@@ -1,170 +1,165 @@
 // src/hooks/useLocation.js
-// Handles three location methods: GPS, zip code lookup, and what3words
-
 import { useState, useCallback } from 'react';
+import { encode as olcEncode, decode as olcDecode, isValid as olcIsValid } from '../utils/plusCodes.js';
 
-// Free reverse geocoding via OpenStreetMap Nominatim (no key required)
+// ── Plus Code helpers ─────────────────────────────────────────────────────────
+function encodePlusCode(lat, lng) {
+  try { return olcEncode(lat, lng, 10); }
+  catch { return null; }
+}
+
+function decodePlusCode(code) {
+  try {
+    const trimmed = code.trim().toUpperCase();
+    if (!olcIsValid(trimmed)) return { error: 'Not a valid Plus Code. Example: 85GQ2222+GG' };
+    const decoded = olcDecode(trimmed);
+    return { lat: decoded.latitudeCenter, lng: decoded.longitudeCenter };
+  } catch (err) {
+    return { error: `Invalid Plus Code: ${err.message}` };
+  }
+}
+
+// ── Reverse geocode via OpenStreetMap (free, no key) ─────────────────────────
 async function reverseGeocode(lat, lng) {
   try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 6000);
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-      { headers: { 'Accept-Language': 'en' } }
+      { headers: { 'Accept-Language': 'en' }, signal: controller.signal }
     );
+    clearTimeout(timer);
+    if (!res.ok) return null;
     const data = await res.json();
     const addr = data.address || {};
-
-    // Build a human-readable location string
     const parts = [
       addr.neighbourhood || addr.suburb || addr.quarter,
       addr.city || addr.town || addr.village || addr.county,
       addr.state,
       addr.country_code?.toUpperCase(),
     ].filter(Boolean);
-
-    return parts.join(', ') || data.display_name?.split(',').slice(0, 3).join(',') || 'Unknown location';
+    return parts.join(', ') || null;
   } catch {
     return null;
   }
 }
 
-// Zip code → city/state via free Zippopotam API
+// ── Zip code via Zippopotam (free, no key) ────────────────────────────────────
 async function zipToLocation(zip, countryCode = 'US') {
   try {
-    const res  = await fetch(`https://api.zippopotam.us/${countryCode}/${zip.trim()}`);
+    const res = await fetch(`https://api.zippopotam.us/${countryCode}/${zip.trim()}`);
     if (!res.ok) return null;
     const data = await res.json();
     const place = data.places?.[0];
     if (!place) return null;
-    return `${place['place name']}, ${place['state abbreviation']}`;
+    return `${place['place name']}, ${place['state abbreviation'] || place['state']}`;
   } catch {
     return null;
   }
 }
 
-// what3words via our server-side proxy
-async function w3wToLocation(words) {
-  try {
-    const res  = await fetch('/api/w3w-convert', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ words }),
-      signal: AbortSignal.timeout(8000),
-    });
-    const data = await res.json();
-    if (!data.available || data.error) return { error: data.reason || data.error, available: data.available };
-    return { lat: data.lat, lng: data.lng, nearestPlace: data.nearestPlace, words: data.words, available: true };
-  } catch (err) {
-    return { error: err.message, available: false };
-  }
-}
-
+// ── Hook ──────────────────────────────────────────────────────────────────────
 export function useLocation() {
-  const [status,      setStatus]      = useState('idle');
-  // 'idle' | 'requesting' | 'resolving' | 'done' | 'error'
+  const [status,              setStatus]              = useState('idle');
   const [locationDescription, setLocationDescription] = useState('');
-  const [coords,      setCoords]      = useState(null); // { lat, lng }
-  const [error,       setError]       = useState(null);
-  const [w3wWords,    setW3wWords]    = useState('');
+  const [coords,              setCoords]              = useState(null);
+  const [error,               setError]               = useState(null);
+  const [plusCode,            setPlusCode]            = useState('');
+  const [debugInfo,           setDebugInfo]           = useState('');
 
-  // ── GPS ──────────────────────────────────────────────────────────────────
+  // ── GPS ───────────────────────────────────────────────────────────────────
   const requestGPS = useCallback(async () => {
+    setError(null);
+    setDebugInfo('');
+
     if (!navigator.geolocation) {
-      setError('Geolocation not supported on this device.');
+      setError('Geolocation API not available in this browser. Try zip code or type your location.');
       setStatus('error');
       return null;
     }
 
     setStatus('requesting');
-    setError(null);
+    setDebugInfo('Asking browser for permission…');
 
     return new Promise((resolve) => {
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
-          const { latitude: lat, longitude: lng } = pos.coords;
-          setCoords({ lat, lng });
-          setStatus('resolving');
+          try {
+            const { latitude: lat, longitude: lng, accuracy } = pos.coords;
+            setDebugInfo(`Got coords (±${Math.round(accuracy)}m). Looking up address…`);
+            setCoords({ lat, lng });
+            setStatus('resolving');
 
-          const desc = await reverseGeocode(lat, lng);
-          const result = desc || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-          setLocationDescription(result);
-          setStatus('done');
-          resolve({ lat, lng, description: result });
+            const code = encodePlusCode(lat, lng);
+            if (code) setPlusCode(code);
+
+            const desc = await reverseGeocode(lat, lng);
+            const result = desc || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+            setLocationDescription(result);
+            setDebugInfo('');
+            setStatus('done');
+            resolve({ lat, lng, description: result, plusCode: code });
+          } catch (innerErr) {
+            const { latitude: lat, longitude: lng } = pos.coords;
+            const fallback = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+            setLocationDescription(fallback);
+            setDebugInfo('');
+            setStatus('done');
+            resolve({ lat, lng, description: fallback });
+          }
         },
         (err) => {
-          const msgs = {
-            1: 'Location permission denied. Try zip code or what3words instead.',
-            2: 'Location unavailable. Try zip code or what3words instead.',
-            3: 'Location request timed out.',
+          const codeMap = {
+            1: { msg: 'Permission denied.', hint: 'iPhone: Settings → Privacy & Security → Location Services → Safari → While Using. Then try again.' },
+            2: { msg: 'Position unavailable.', hint: 'Enable Location Services in device Settings, or use zip code.' },
+            3: { msg: 'Request timed out.', hint: 'Try moving outside, or use zip code instead.' },
           };
-          setError(msgs[err.code] || 'Could not get location.');
+          const info = codeMap[err.code] || { msg: `Error (code ${err.code}).`, hint: 'Try zip code instead.' };
+          setError(`${info.msg} ${info.hint}`);
+          setDebugInfo(`code=${err.code} "${err.message}"`);
           setStatus('error');
           resolve(null);
         },
-        { timeout: 10000, maximumAge: 60000, enableHighAccuracy: false }
+        { timeout: 15000, maximumAge: 120000, enableHighAccuracy: false }
       );
     });
   }, []);
 
   // ── Zip code ──────────────────────────────────────────────────────────────
   const lookupZip = useCallback(async (zip, countryCode = 'US') => {
-    if (!zip || zip.trim().length < 3) {
-      setError('Enter a valid zip/postal code.');
-      setStatus('error');
-      return null;
-    }
-
+    if (!zip?.trim()) { setError('Enter a zip or postal code.'); setStatus('error'); return null; }
     setStatus('resolving');
     setError(null);
-
-    const result = await zipToLocation(zip, countryCode);
+    const result = await zipToLocation(zip.trim(), countryCode);
     if (!result) {
-      setError(`Zip code "${zip}" not found. Try a different code.`);
+      setError(`"${zip}" not found. Check the code or try a nearby zip.`);
       setStatus('error');
       return null;
     }
-
     setLocationDescription(result);
     setStatus('done');
     return { description: result };
   }, []);
 
-  // ── what3words ────────────────────────────────────────────────────────────
-  const lookupW3W = useCallback(async (words) => {
-    if (!words || words.trim().split(/[\s.]+/).filter(Boolean).length < 3) {
-      setError('Enter all three words (e.g. filled.count.soap)');
-      setStatus('error');
-      return null;
-    }
-
+  // ── Plus Code ─────────────────────────────────────────────────────────────
+  const lookupPlusCode = useCallback(async (code) => {
+    if (!code?.trim()) { setError('Enter a Plus Code (e.g. 85GQ2222+GG)'); setStatus('error'); return null; }
     setStatus('resolving');
     setError(null);
-
-    const result = await w3wToLocation(words);
-
-    if (!result.available) {
-      setError('what3words not configured on this server. Use GPS or zip code.');
-      setStatus('error');
-      return null;
-    }
-    if (result.error) {
-      setError(`what3words error: ${result.error}`);
-      setStatus('error');
-      return null;
-    }
-
-    const { lat, lng, nearestPlace } = result;
+    const decoded = decodePlusCode(code.trim());
+    if (decoded.error) { setError(decoded.error); setStatus('error'); return null; }
+    const { lat, lng } = decoded;
     setCoords({ lat, lng });
-    setW3wWords(result.words);
-
-    // Reverse geocode the coordinates for a richer description
-    const geoDesc = await reverseGeocode(lat, lng);
-    const desc = [nearestPlace, geoDesc].filter(Boolean).join(' · ') || result.words;
-    setLocationDescription(desc);
+    setPlusCode(code.trim().toUpperCase());
+    const desc = await reverseGeocode(lat, lng);
+    const result = desc || `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    setLocationDescription(result);
     setStatus('done');
-    return { lat, lng, description: desc, words: result.words };
+    return { lat, lng, description: result };
   }, []);
 
-  // ── Manual text description ───────────────────────────────────────────────
+  // ── Manual ────────────────────────────────────────────────────────────────
   const setManual = useCallback((text) => {
     const trimmed = text.trim();
     if (!trimmed) return;
@@ -172,6 +167,7 @@ export function useLocation() {
     setCoords(null);
     setStatus('done');
     setError(null);
+    setDebugInfo('');
   }, []);
 
   const reset = useCallback(() => {
@@ -179,20 +175,14 @@ export function useLocation() {
     setLocationDescription('');
     setCoords(null);
     setError(null);
-    setW3wWords('');
+    setPlusCode('');
+    setDebugInfo('');
   }, []);
 
   return {
-    status,
-    locationDescription,
-    coords,
-    error,
-    w3wWords,
-    requestGPS,
-    lookupZip,
-    lookupW3W,
-    setManual,
-    reset,
+    status, locationDescription, coords, error,
+    debugInfo, plusCode,
+    requestGPS, lookupZip, lookupPlusCode, setManual, reset,
     isSupported: !!navigator.geolocation,
   };
 }

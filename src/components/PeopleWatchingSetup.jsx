@@ -4,39 +4,38 @@ import { useLocation } from '../hooks/useLocation.js';
 import { loadPreferences, savePreferences } from '../services/preferences.js';
 
 const VIBE_OPTIONS = [
-  { value: 'anywhere',    icon: '🌍', label: 'Anywhere',      desc: 'Generic public space' },
-  { value: 'coffee_shop', icon: '☕', label: 'Coffee Shop',   desc: 'Cafes, bakeries, pastry spots' },
+  { value: 'anywhere',    icon: '🌍', label: 'Anywhere',         desc: 'Generic public space' },
+  { value: 'coffee_shop', icon: '☕', label: 'Coffee Shop',      desc: 'Cafes, bakeries, pastry spots' },
   { value: 'bar',         icon: '🍺', label: 'Bar / Restaurant', desc: 'Pubs, diners, patios' },
-  { value: 'mall',        icon: '🛍️', label: 'Mall / Shopping', desc: 'Retail, food courts' },
-  { value: 'park',        icon: '🌳', label: 'Park / Outdoors', desc: 'Green spaces, trails' },
-  { value: 'airport',     icon: '✈️', label: 'Airport',        desc: 'Gates, terminals' },
+  { value: 'mall',        icon: '🛍️', label: 'Mall / Shopping',  desc: 'Retail, food courts' },
+  { value: 'park',        icon: '🌳', label: 'Park / Outdoors',  desc: 'Green spaces, trails' },
+  { value: 'airport',     icon: '✈️', label: 'Airport',           desc: 'Gates, terminals' },
   { value: 'beach',       icon: '🏖️', label: 'Beach / Waterfront', desc: 'Shoreline, boardwalk' },
-  { value: 'stadium',     icon: '🏟️', label: 'Stadium / Arena', desc: 'Non-game event' },
+  { value: 'stadium',     icon: '🏟️', label: 'Stadium / Arena',  desc: 'Non-game event' },
 ];
 
 const LOCATION_METHODS = [
-  { value: 'gps',    icon: '📍', label: 'Use My Location',  desc: 'GPS auto-detects where you are' },
-  { value: 'zip',    icon: '🔢', label: 'Zip / Postal Code', desc: 'Type your zip or postal code' },
-  { value: 'w3w',    icon: '///', label: 'what3words',        desc: '3-word location address' },
-  { value: 'manual', icon: '✏️', label: 'Type It In',        desc: 'Describe your location yourself' },
+  { value: 'gps',      icon: '📍', label: 'Use My Location', desc: 'GPS auto-detects where you are' },
+  { value: 'zip',      icon: '🔢', label: 'Zip Code',        desc: 'Type your zip or postal code' },
+  { value: 'pluscode', icon: '⊞',  label: 'Plus Code',       desc: 'Google open location code' },
+  { value: 'manual',   icon: '✏️', label: 'Type It In',      desc: 'Describe your location' },
 ];
 
 export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, llmStatus }) {
-  const [mode,     setMode]     = useState('create');
-  const [name,     setName]     = useState('');
-  const [vibe,     setVibe]     = useState('anywhere');
-  const [method,   setMethod]   = useState('gps');
-  const [zipInput, setZipInput] = useState('');
-  const [w3wInput, setW3wInput] = useState('');
-  const [manInput, setManInput] = useState('');
-  const [joinCode, setJoinCode] = useState('');
-  const [botCount, setBotCount] = useState(1);
-  const [loading,  setLoading]  = useState(false);
+  const [mode,       setMode]       = useState('create');
+  const [name,       setName]       = useState('');
+  const [vibe,       setVibe]       = useState('anywhere');
+  const [method,     setMethod]     = useState('gps');
+  const [zipInput,   setZipInput]   = useState('');
+  const [plusInput,  setPlusInput]  = useState('');
+  const [manInput,   setManInput]   = useState('');
+  const [joinCode,   setJoinCode]   = useState('');
+  const [botCount,   setBotCount]   = useState(1);
+  const [loading,    setLoading]    = useState(false);
   const [savedBadge, setSavedBadge] = useState(false);
 
   const loc = useLocation();
 
-  // Load saved prefs
   useEffect(() => {
     const p = loadPreferences();
     if (p.name)    setName(p.name);
@@ -47,34 +46,21 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
   const canCreate = name.trim().length >= 2 && loc.status === 'done';
   const canJoin   = name.trim().length >= 2 && joinCode.trim().length === 4;
 
-  const handleGPS = async () => {
-    await loc.requestGPS();
-  };
-
-  const handleZip = async () => {
-    if (!zipInput.trim()) return;
-    await loc.lookupZip(zipInput.trim());
-  };
-
-  const handleW3W = async () => {
-    if (!w3wInput.trim()) return;
-    await loc.lookupW3W(w3wInput.trim());
-  };
-
-  const handleManual = () => {
-    if (!manInput.trim()) return;
-    loc.setManual(manInput.trim());
+  const persistPrefs = () => {
+    savePreferences({ name: name.trim(), pwVibe: vibe, botCount });
+    setSavedBadge(true);
+    setTimeout(() => setSavedBadge(false), 2000);
   };
 
   const handleCreate = async () => {
     if (!canCreate || loading) return;
     setLoading(true);
-    savePreferences({ name: name.trim(), pwVibe: vibe, botCount });
+    persistPrefs();
     try {
       await onCreateRoom({
         name:                name.trim(),
-        sport:               'people',        // special mode flag
-        location:            'liveGame',       // always has camera squares
+        sport:               'people',
+        location:            'liveGame',
         locationDescription: loc.locationDescription,
         vibe,
         botCount,
@@ -90,18 +76,8 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
     if (!canJoin || loading) return;
     setLoading(true);
     try {
-      await onJoinRoom({
-        name: name.trim(),
-        team: '',
-        code: joinCode.trim().toUpperCase(),
-      });
+      await onJoinRoom({ name: name.trim(), team: '', code: joinCode.trim().toUpperCase() });
     } finally { setLoading(false); }
-  };
-
-  const persistPrefs = () => {
-    savePreferences({ name: name.trim(), pwVibe: vibe, botCount });
-    setSavedBadge(true);
-    setTimeout(() => setSavedBadge(false), 2000);
   };
 
   return (
@@ -121,7 +97,7 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
             👁 People Watching
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            AI-generated bingo based on your location
+            AI bingo cards tailored to your exact location
           </div>
         </div>
       </div>
@@ -139,24 +115,25 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
             <input className="input" placeholder="e.g. Alex" value={name}
               onChange={e => setName(e.target.value)} maxLength={20} />
           </div>
-          <button className="btn btn-secondary btn-sm" style={{ marginTop: 10, alignSelf: 'flex-start' }}
-            onClick={persistPrefs}>💾 Save Preferences</button>
+          <button className="btn btn-secondary btn-sm"
+            style={{ marginTop: 10, alignSelf: 'flex-start' }}
+            onClick={persistPrefs}>
+            💾 Save Preferences
+          </button>
         </div>
 
         {/* Mode toggle */}
         <div className="segment-group">
-          <button className={`segment-btn ${mode === 'create' ? 'active' : ''}`} onClick={() => setMode('create')}>
-            ✨ Create Game
-          </button>
-          <button className={`segment-btn ${mode === 'join' ? 'active' : ''}`} onClick={() => setMode('join')}>
-            🔗 Join Game
-          </button>
+          <button className={`segment-btn ${mode === 'create' ? 'active' : ''}`}
+            onClick={() => setMode('create')}>✨ Create Game</button>
+          <button className={`segment-btn ${mode === 'join' ? 'active' : ''}`}
+            onClick={() => setMode('join')}>🔗 Join Game</button>
         </div>
 
         {/* ── CREATE ── */}
         {mode === 'create' && (<>
 
-          {/* Location method */}
+          {/* Location */}
           <div className="card">
             <p className="section-title" style={{ marginBottom: 12 }}>📍 Your Location</p>
 
@@ -181,67 +158,75 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
             {method === 'gps' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Tap below to detect your location. Your device will ask for permission.
+                  Tap below — your device will ask for location permission.
                 </p>
-                <button
-                  className="btn btn-secondary"
-                  onClick={handleGPS}
-                  disabled={loc.status === 'requesting' || loc.status === 'resolving'}
-                >
+                <button className="btn btn-secondary" onClick={loc.requestGPS}
+                  disabled={loc.status === 'requesting' || loc.status === 'resolving'}>
                   {loc.status === 'requesting' ? '📡 Requesting…'
                    : loc.status === 'resolving' ? '🗺 Resolving…'
                    : '📍 Detect My Location'}
                 </button>
                 {!loc.isSupported && (
                   <p style={{ fontSize: 11, color: 'var(--accent)' }}>
-                    ⚠️ GPS not available on this browser. Use zip code or type your location.
+                    ⚠️ GPS not available. Use zip code or type your location.
                   </p>
                 )}
               </div>
             )}
 
-            {/* Zip code */}
+            {/* Zip */}
             {method === 'zip' && (
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input className="input" style={{ flex: 1 }}
-                  placeholder="e.g. 80202 or M5V 3A8"
-                  value={zipInput} onChange={e => setZipInput(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && handleZip()}
-                  maxLength={10}
-                />
-                <button className="btn btn-secondary"
-                  onClick={handleZip}
-                  disabled={loc.status === 'resolving' || !zipInput.trim()}
-                >
-                  {loc.status === 'resolving' ? '…' : '→'}
-                </button>
-              </div>
-            )}
-
-            {/* what3words */}
-            {method === 'w3w' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <p style={{ fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-                  Open the <strong>what3words app</strong> to find your 3-word address, then type it below.
-                  Format: <code style={{ background: 'var(--surface2)', padding: '1px 5px', borderRadius: 4 }}>word.word.word</code>
+                <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  US zip codes and Canadian postal codes both work.
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input className="input" style={{ flex: 1 }}
-                    placeholder="e.g. filled.count.soap"
-                    value={w3wInput}
-                    onChange={e => setW3wInput(e.target.value.toLowerCase().replace(/[^a-z.]/g, ''))}
-                    onKeyDown={e => e.key === 'Enter' && handleW3W()}
+                    placeholder="e.g. 93402 or M5V 3A8"
+                    value={zipInput}
+                    onChange={e => setZipInput(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && loc.lookupZip(zipInput)}
+                    maxLength={10}
                   />
                   <button className="btn btn-secondary"
-                    onClick={handleW3W}
-                    disabled={loc.status === 'resolving' || !w3wInput.trim()}
-                  >
-                    {loc.status === 'resolving' ? '…' : '///'}
+                    onClick={() => loc.lookupZip(zipInput)}
+                    disabled={loc.status === 'resolving' || !zipInput.trim()}>
+                    {loc.status === 'resolving' ? '…' : '→'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Plus Code */}
+            {method === 'pluscode' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <div style={{
+                  background: 'var(--surface2)', borderRadius: 8,
+                  padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.7,
+                }}>
+                  <strong style={{ color: 'var(--text)' }}>How to find your Plus Code:</strong>
+                  <br />1. Open <strong>Google Maps</strong> on your phone
+                  <br />2. Tap and hold your location until a pin drops
+                  <br />3. Tap the red pin — the Plus Code appears at the top
+                  <br />4. It looks like <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 5px', borderRadius: 4 }}>85GQ2222+GG</code>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <input className="input" style={{ flex: 1, fontFamily: 'monospace', letterSpacing: '0.05em' }}
+                    placeholder="e.g. 85GQ2222+GG"
+                    value={plusInput}
+                    onChange={e => setPlusInput(e.target.value.toUpperCase())}
+                    onKeyDown={e => e.key === 'Enter' && loc.lookupPlusCode(plusInput)}
+                    maxLength={15}
+                  />
+                  <button className="btn btn-secondary"
+                    onClick={() => loc.lookupPlusCode(plusInput)}
+                    disabled={loc.status === 'resolving' || !plusInput.trim()}>
+                    {loc.status === 'resolving' ? '…' : '⊞'}
                   </button>
                 </div>
                 <p style={{ fontSize: 10, color: 'var(--text-muted)' }}>
-                  what3words gives every 3m² on Earth a unique 3-word address.
-                  Get the free app at what3words.com
+                  Plus Codes are Google's free open location standard — no account needed.
+                  Decoded entirely on your device, nothing sent to Google.
                 </p>
               </div>
             )}
@@ -250,20 +235,19 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
             {method === 'manual' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  Describe where you are — be as specific as you like.
+                  Describe where you are — the more specific the better.
                 </p>
                 <div style={{ display: 'flex', gap: 8 }}>
                   <input className="input" style={{ flex: 1 }}
                     placeholder="e.g. Pearl Street Mall, Boulder CO"
                     value={manInput}
                     onChange={e => setManInput(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleManual()}
+                    onKeyDown={e => e.key === 'Enter' && loc.setManual(manInput)}
                     maxLength={80}
                   />
                   <button className="btn btn-secondary"
-                    onClick={handleManual}
-                    disabled={!manInput.trim()}
-                  >→</button>
+                    onClick={() => loc.setManual(manInput)}
+                    disabled={!manInput.trim()}>→</button>
                 </div>
               </div>
             )}
@@ -284,34 +268,34 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
               <div style={{
                 marginTop: 10, padding: '10px 14px', borderRadius: 8,
                 background: 'rgba(0,184,148,0.1)', border: '1px solid var(--green)',
-                display: 'flex', alignItems: 'center', gap: 8,
+                display: 'flex', alignItems: 'flex-start', gap: 8,
               }}>
-                <span style={{ fontSize: 18 }}>📍</span>
-                <div>
+                <span style={{ fontSize: 18, flexShrink: 0 }}>📍</span>
+                <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--green)' }}>
-                    Location found!
+                    Location set!
                   </div>
-                  <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text)' }}>
                     {loc.locationDescription}
                   </div>
-                  {loc.w3wWords && (
-                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
-                      ///{loc.w3wWords}
+                  {loc.plusCode && (
+                    <div style={{
+                      fontSize: 10, color: 'var(--text-muted)', marginTop: 3,
+                      fontFamily: 'monospace',
+                    }}>
+                      ⊞ {loc.plusCode}
                     </div>
                   )}
                 </div>
-                <button
-                  onClick={loc.reset}
-                  style={{
-                    marginLeft: 'auto', background: 'none', border: 'none',
-                    cursor: 'pointer', fontSize: 14, color: 'var(--text-muted)',
-                  }}
-                >✕</button>
+                <button onClick={loc.reset} style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  fontSize: 14, color: 'var(--text-muted)', flexShrink: 0,
+                }}>✕</button>
               </div>
             )}
           </div>
 
-          {/* Vibe selector */}
+          {/* Vibe */}
           <div className="card">
             <p className="section-title" style={{ marginBottom: 12 }}>Setting / Vibe</p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
@@ -332,9 +316,7 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
 
           {/* Bot count */}
           <div className="card">
-            <p className="section-title" style={{ marginBottom: 10 }}>
-              AI Bot Competitors 🤖
-            </p>
+            <p className="section-title" style={{ marginBottom: 10 }}>AI Bot Competitors 🤖</p>
             <div style={{ display: 'flex', gap: 6 }}>
               {[0,1,2,3].map(n => (
                 <button key={n} onClick={() => setBotCount(n)} style={{
@@ -364,7 +346,7 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
               )}
             </div>
             <p style={{ lineHeight: 1.6 }}>
-              Claude generates hyper-local people watching squares based on exactly where you are and the vibe you're in.
+              Claude writes squares specific to your exact location and vibe.
               📷 Camera squares require a sneaky photo as proof.
             </p>
           </div>
@@ -372,14 +354,18 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
           <button
             className="btn btn-lg"
             style={{
-              background: 'linear-gradient(135deg, #a78bfa, #ec4899)',
+              background: canCreate
+                ? 'linear-gradient(135deg, #a78bfa, #ec4899)'
+                : 'var(--surface2)',
               color: '#fff', border: 'none',
             }}
             onClick={handleCreate}
             disabled={!canCreate || loading}
           >
-            {loading ? (llmStatus === 'generating' ? '✨ Generating…' : 'Creating…')
-              : loc.status !== 'done' ? '📍 Set location first'
+            {loading
+              ? (llmStatus === 'generating' ? '✨ Generating…' : 'Creating…')
+              : loc.status !== 'done'
+              ? '📍 Set your location first'
               : '👁 Start People Watching'}
           </button>
 
@@ -394,9 +380,10 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
               style={{ fontSize: 24, fontWeight: 900, letterSpacing: '0.25em', textAlign: 'center' }}
             />
             <p style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>
-              You'll get your own AI-generated card. Location and vibe match the host.
+              You'll get your own AI-generated card. Location and vibe match the host's.
             </p>
-            <button className="btn btn-primary btn-lg" onClick={handleJoin} disabled={!canJoin || loading}>
+            <button className="btn btn-primary btn-lg" onClick={handleJoin}
+              disabled={!canJoin || loading}>
               {loading ? 'Joining…' : '🔗 Join Game'}
             </button>
           </div>
@@ -405,13 +392,14 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
         {/* How it works */}
         <div className="card" style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 2 }}>
           <p className="section-title" style={{ marginBottom: 8 }}>How It Works</p>
-          <p>📍 Share your location so AI can write location-specific squares</p>
-          <p>👁 Spot things happening around you and tap to mark</p>
-          <p>📷 Camera squares need a sneaky photo — AI referee verifies it</p>
+          <p>📍 Share your location so AI writes location-specific squares</p>
+          <p>⊞ Use a Plus Code from Google Maps for pinpoint accuracy</p>
+          <p>👁 Spot things around you and tap to mark</p>
+          <p>📷 Camera squares need a photo — AI referee verifies it</p>
           <p>⚡ Battle squares are the rarest, most spectacular sightings</p>
-          <p>💬 Chat and trash talk while you watch the world go by</p>
-          <p>🤖 Letterkenny bots keep things lively in chat</p>
+          <p>💬 Chat and trash talk with your fellow people watchers</p>
         </div>
+
       </div>
     </div>
   );
