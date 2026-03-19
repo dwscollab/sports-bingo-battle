@@ -60,7 +60,7 @@ export function useLLMSquares() {
       // Insert FREE space at center (index 12)
       const card = [
         ...shaped.slice(0, 12),
-        { ...FREE_SPACE },
+        { ...FREE_SPACE, isMarked: true, isBlocked: false },
         ...shaped.slice(12, 24),
       ].map((sq, idx) => ({ ...sq, index: idx }));
 

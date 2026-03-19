@@ -230,6 +230,8 @@ export const FREE_SPACE = {
   text: '⭐ FREE',
   battle: false,
   isFree: true,
+  isMarked: true,
+  isBlocked: false,
 };
 
 /**

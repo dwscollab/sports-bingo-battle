@@ -8,7 +8,8 @@ import { v4 as uuidv4 } from 'uuid';
 import Lobby          from './components/Lobby.jsx';
 import WaitingRoom    from './components/WaitingRoom.jsx';
 import GameBoard      from './components/GameBoard.jsx';
-import WinScreen      from './components/WinScreen.jsx';
+import WinScreen            from './components/WinScreen.jsx';
+import PeopleWatchingSetup  from './components/PeopleWatchingSetup.jsx';
 import ToastContainer from './components/ToastContainer.jsx';
 import { useNHLFeed }    from './hooks/useNHLFeed.js';
 import { useLLMSquares } from './hooks/useLLMSquares.js';
@@ -31,6 +32,7 @@ export default function App() {
   const [toasts,      setToasts]      = useState([]);
   const [winner,      setWinner]      = useState(null);
   const [isHost,      setIsHost]      = useState(false);
+  const [showPeopleWatching, setShowPeopleWatching] = useState(false);
   const [chatMessages,setChatMessages]= useState([]);
   const seenAttacks   = useRef(new Set());
   const botChatTimer  = useRef(null);
@@ -265,19 +267,58 @@ export default function App() {
     });
   }, [roomCode, playerName, roomData, playerId]);
 
+
+  // ── Generate people-watching card ─────────────────────────────────────────
+  const generatePeopleCard = useCallback(async ({ locationDescription, vibe, playerCount }) => {
+    try {
+      const response = await fetch('/api/generate-people-squares', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ locationDescription, vibe, playerCount }),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) throw new Error(`Server ${response.status}`);
+      const data = await response.json();
+      if (!Array.isArray(data.squares)) throw new Error('Bad response');
+
+      const { FREE_SPACE } = await import('./data/bingoSquares.js');
+      const shaped = data.squares.slice(0, 24).map((sq, i) => ({
+        id: `pw_${Date.now()}_${i}`, text: sq.text || `Square ${i+1}`,
+        battle: !!sq.battle, camera: !!sq.camera,
+        isMarked: false, isBlocked: false, llmGenerated: true,
+      }));
+      return [
+        ...shaped.slice(0, 12),
+        { ...FREE_SPACE, isMarked: true, isBlocked: false },
+        ...shaped.slice(12, 24),
+      ].map((sq, idx) => ({ ...sq, index: idx }));
+    } catch (err) {
+      console.warn('People squares failed, using fallback:', err.message);
+      const { generateCard } = await import('./data/bingoSquares.js');
+      return generateCard('hockey', 'liveGame');
+    }
+  }, []);
+
   // ── Create room ───────────────────────────────────────────────────────────
   const handleCreateRoom = useCallback(async ({
     name, sport, team, homeTeam, awayTeam, gameLabel, location, botCount,
+    locationDescription, vibe,
   }) => {
     const code   = Math.random().toString(36).substring(2, 6).toUpperCase();
     const colors = team ? getTeamColors(sport, team) : null;
 
     addToast('✨ Generating your card with AI…', 'success');
 
-    const card = await generateLLMCard({
-      sport, homeTeam, awayTeam,
-      location, gameDate: new Date().toDateString(),
-    });
+    const card = sport === 'people'
+      ? await generatePeopleCard({
+          locationDescription: locationDescription || gameLabel,
+          vibe: vibe || 'anywhere',
+          playerCount: 1 + (botCount || 0),
+        })
+      : await generateLLMCard({
+          sport, homeTeam, awayTeam,
+          location, gameDate: new Date().toDateString(),
+        });
 
     const players = {
       [playerId]: { name, team, colors, card, bingo: false, bingoLine: null, battleShots: 0 },
@@ -286,10 +327,9 @@ export default function App() {
     for (let i = 0; i < (botCount || 0); i++) {
       const botId   = `bot_${uuidv4().slice(0, 8)}`;
       const bot     = createBotPlayer(i, sport);
-      const botCard = await generateLLMCard({
-        sport, homeTeam, awayTeam,
-        location, gameDate: new Date().toDateString(),
-      });
+      const botCard = sport === 'people'
+        ? await generatePeopleCard({ locationDescription: locationDescription || gameLabel, vibe: vibe || 'anywhere', playerCount: 2 })
+        : await generateLLMCard({ sport, homeTeam, awayTeam, location, gameDate: new Date().toDateString() });
       bot.card = botCard;
       players[botId] = bot;
     }
@@ -299,6 +339,8 @@ export default function App() {
       homeTeam: homeTeam || null,
       awayTeam: awayTeam || null,
       gameLabel: gameLabel || null,
+      locationDescription: locationDescription || null,
+      vibe: vibe || null,
       createdAt: serverTimestamp(),
       status: 'waiting', host: playerId, players,
     });
@@ -445,16 +487,26 @@ export default function App() {
     setTeamColors(null);
     setIsHost(false);
     setChatMessages([]);
+    setShowPeopleWatching(false);
   }, []);
 
   return (
     <>
       <ToastContainer toasts={toasts} />
 
-      {screen === 'lobby' && (
+      {screen === 'lobby' && !showPeopleWatching && (
         <Lobby
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
+          onPeopleWatching={() => setShowPeopleWatching(true)}
+          llmStatus={llmStatus}
+        />
+      )}
+      {screen === 'lobby' && showPeopleWatching && (
+        <PeopleWatchingSetup
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          onBack={() => setShowPeopleWatching(false)}
           llmStatus={llmStatus}
         />
       )}

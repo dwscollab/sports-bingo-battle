@@ -99,7 +99,7 @@ function TeamPicker({ sport, value, onChange, placeholder = 'Pick a team…', co
 }
 
 // ── Main Lobby ────────────────────────────────────────────────────────────────
-export default function Lobby({ onCreateRoom, onJoinRoom, llmStatus }) {
+export default function Lobby({ onCreateRoom, onJoinRoom, onPeopleWatching, llmStatus }) {
   const [mode,      setMode]      = useState('create');
   const [name,      setName]      = useState('');
   const [sport,     setSport]     = useState('hockey');
@@ -363,6 +363,34 @@ export default function Lobby({ onCreateRoom, onJoinRoom, llmStatus }) {
             </button>
           </div>
         )}
+
+        {/* No game? People watching mode */}
+        <button
+          onClick={onPeopleWatching}
+          style={{
+            width: '100%',
+            padding: '16px 20px',
+            borderRadius: 14,
+            border: '1.5px dashed #a78bfa88',
+            background: 'rgba(167,139,250,0.06)',
+            cursor: 'pointer',
+            display: 'flex', alignItems: 'center', gap: 14,
+            textAlign: 'left',
+            transition: 'all 0.15s',
+          }}
+        >
+          <span style={{ fontSize: 32, flexShrink: 0 }}>👁</span>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 15, color: '#a78bfa', marginBottom: 2 }}>
+              No game? People Watch instead
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              AI generates bingo squares based on your location.
+              Use GPS, zip code, or what3words.
+            </div>
+          </div>
+          <span style={{ marginLeft: 'auto', color: '#a78bfa', fontSize: 18 }}>→</span>
+        </button>
 
         {/* How to play */}
         <div className="card" style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 2 }}>

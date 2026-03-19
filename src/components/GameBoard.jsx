@@ -6,7 +6,7 @@ import CameraVerifyModal from './CameraVerifyModal.jsx';
 import ChatBox from './ChatBox.jsx';
 import OpponentBoardModal from './OpponentBoardModal.jsx';
 
-const SPORT_LABELS = { hockey: '🏒', nfl: '🏈', nba: '🏀' };
+const SPORT_LABELS = { hockey: '🏒', nfl: '🏈', nba: '🏀', people: '👁' };
 const STATUS_CONFIG = {
   live:      { dot: '#00ff88', label: 'LIVE',     pulse: true  },
   'pre-game':{ dot: '#ffd700', label: 'PRE-GAME', pulse: true  },
@@ -128,7 +128,7 @@ export default function GameBoard({
           )}
           {roomData?.gameLabel && (
             <div style={{ fontSize: 11, color: teamText, opacity: 0.7, marginTop: 2 }}>
-              🏒 {roomData.gameLabel}
+              {sport === 'people' ? '📍' : '🏒'} {roomData.gameLabel}
             </div>
           )}
         </div>
