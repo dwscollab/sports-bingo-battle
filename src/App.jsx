@@ -1,7 +1,9 @@
 // src/App.jsx
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { db } from './firebase.js';
-import { ref, set, onValue, off, update, serverTimestamp, get } from 'firebase/database';
+import {
+  ref, set, onValue, off, update, push, serverTimestamp, get,
+} from 'firebase/database';
 import { v4 as uuidv4 } from 'uuid';
 import Lobby          from './components/Lobby.jsx';
 import WaitingRoom    from './components/WaitingRoom.jsx';
@@ -15,20 +17,22 @@ import { getTeamColors, buildTeamTheme } from './data/teamColors.js';
 import { createBotPlayer } from './data/botPlayers.js';
 
 export default function App() {
-  const [screen,     setScreen]     = useState('lobby');
-  const [playerId]                  = useState(() => {
+  const [screen,      setScreen]      = useState('lobby');
+  const [playerId]                    = useState(() => {
     let id = sessionStorage.getItem('bingo_pid');
     if (!id) { id = uuidv4(); sessionStorage.setItem('bingo_pid', id); }
     return id;
   });
-  const [playerName, setPlayerName] = useState('');
-  const [playerTeam, setPlayerTeam] = useState('');
-  const [roomCode,   setRoomCode]   = useState('');
-  const [roomData,   setRoomData]   = useState(null);
-  const [teamColors, setTeamColors] = useState(null);
-  const [toasts,     setToasts]     = useState([]);
-  const [winner,     setWinner]     = useState(null);
-  const [isHost,     setIsHost]     = useState(false);
+  const [playerName,  setPlayerName]  = useState('');
+  const [playerTeam,  setPlayerTeam]  = useState('');
+  const [roomCode,    setRoomCode]    = useState('');
+  const [roomData,    setRoomData]    = useState(null);
+  const [teamColors,  setTeamColors]  = useState(null);
+  const [toasts,      setToasts]      = useState([]);
+  const [winner,      setWinner]      = useState(null);
+  const [isHost,      setIsHost]      = useState(false);
+  const [chatMessages,setChatMessages]= useState([]);
+  const seenAttacks = useRef(new Set());
 
   const { generateLLMCard, status: llmStatus } = useLLMSquares();
   const sport = roomData?.sport ?? 'hockey';
@@ -49,12 +53,13 @@ export default function App() {
       .forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
   }, [playerTeam, sport]);
 
-  // ── NHL live feed ─────────────────────────────────────────────────────────
+  // ── NHL feed — use myTeam or homeTeam for tracking ────────────────────────
+  const trackTeam = playerTeam || roomData?.homeTeam || '';
   const { gameInfo, autoMarkPatterns, clearAutoMark, connectionStatus } = useNHLFeed({
-    sport, myTeamAbbr: playerTeam, enabled: screen === 'game',
+    sport, myTeamAbbr: trackTeam, enabled: screen === 'game',
   });
 
-  // ── Auto-mark my own card from NHL feed ───────────────────────────────────
+  // ── Auto-mark from NHL feed ───────────────────────────────────────────────
   useEffect(() => {
     if (!autoMarkPatterns.length || !roomData) return;
     const myPlayer = roomData.players?.[playerId];
@@ -84,9 +89,12 @@ export default function App() {
           updates[`rooms/${roomCode}/players/${playerId}/bingo`]     = true;
           updates[`rooms/${roomCode}/players/${playerId}/bingoLine`] = bingoLine;
           addToast('🎉 BINGO! You won!', 'win');
-          const lastIdx = card.findLastIndex((sq, i) => bingoLine.includes(i) && sq.isMarked);
+          const lastIdx = card.findLastIndex((sq, i) =>
+            bingoLine.includes(i) && sq.isMarked
+          );
           if (isBattleshipBingo(card, bingoLine, lastIdx)) {
-            updates[`rooms/${roomCode}/players/${playerId}/battleShots`] = (myPlayer.battleShots || 0) + 1;
+            updates[`rooms/${roomCode}/players/${playerId}/battleShots`] =
+              (myPlayer.battleShots || 0) + 1;
             addToast('⚡ Battleship BINGO! Battle Shot earned!', 'battle');
           }
         }
@@ -97,26 +105,25 @@ export default function App() {
     clearAutoMark();
   }, [autoMarkPatterns, roomData, playerId, roomCode, addToast, clearAutoMark]);
 
-  // ── Bot AI (host only) — uses the sophisticated useAIPlayer hook ──────────
+  // ── Bot AI (host only) ────────────────────────────────────────────────────
   useAIPlayer({
-    roomCode,
-    roomData,
-    autoMarkPatterns,
-    clearAutoMark: () => {}, // bots get their own copy from roomData listener
+    roomCode, roomData, autoMarkPatterns,
+    clearAutoMark: () => {},
     isHost: isHost && screen === 'game',
     humanPlayerId: playerId,
   });
 
-  // ── Firebase room listener ────────────────────────────────────────────────
+  // ── Firebase: room + chat listener ───────────────────────────────────────
   useEffect(() => {
     if (!roomCode) return;
+
+    // Room state
     const roomRef = ref(db, `rooms/${roomCode}`);
-    const handle = onValue(roomRef, snap => {
+    const roomHandle = onValue(roomRef, snap => {
       if (!snap.exists()) return;
       const data = snap.val();
       setRoomData(data);
 
-      // Check for first bingo
       for (const [pid, p] of Object.entries(data.players || {})) {
         if (p.bingo && !winner) {
           setWinner({ name: p.name, isMe: pid === playerId, isBot: !!p.isBot });
@@ -124,40 +131,71 @@ export default function App() {
         }
       }
 
-      // Incoming attack notifications
-      for (const [, atk] of Object.entries(data.attacks || {})) {
-        if (atk.to === playerId && !atk.resolved) {
+      for (const [atkId, atk] of Object.entries(data.attacks || {})) {
+        if (atk.to === playerId && !seenAttacks.current.has(atkId)) {
+          seenAttacks.current.add(atkId);
           addToast(`💣 ${atk.fromName} blocked one of your squares!`, 'battle');
         }
       }
     });
-    return () => off(roomRef, 'value', handle);
+
+    // Chat
+    const chatRef = ref(db, `rooms/${roomCode}/chat`);
+    const chatHandle = onValue(chatRef, snap => {
+      if (!snap.exists()) { setChatMessages([]); return; }
+      const msgs = Object.values(snap.val())
+        .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      setChatMessages(msgs);
+    });
+
+    return () => {
+      off(roomRef,  'value', roomHandle);
+      off(chatRef,  'value', chatHandle);
+    };
   }, [roomCode, playerId, winner, addToast]);
 
-  // ── Advance to game when host starts ─────────────────────────────────────
+  // Auto-advance to game
   useEffect(() => {
     if (roomData?.status === 'playing' && screen === 'waiting') setScreen('game');
   }, [roomData?.status, screen]);
 
+  // ── Send chat message ─────────────────────────────────────────────────────
+  const handleSendChat = useCallback(async (text) => {
+    if (!text.trim() || !roomCode) return;
+    const myPlayer = roomData?.players?.[playerId];
+    const colors = myPlayer?.colors
+      ? { primary: myPlayer.colors.primary, text: myPlayer.colors.text }
+      : null;
+    await push(ref(db, `rooms/${roomCode}/chat`), {
+      name: playerName,
+      text: text.trim(),
+      timestamp: Date.now(),
+      colors,
+    });
+  }, [roomCode, playerName, roomData, playerId]);
+
   // ── Create room ───────────────────────────────────────────────────────────
-  const handleCreateRoom = useCallback(async ({ name, sport, team, location, botCount }) => {
+  const handleCreateRoom = useCallback(async ({
+    name, sport, team, homeTeam, awayTeam, gameLabel, location, botCount,
+  }) => {
     const code   = Math.random().toString(36).substring(2, 6).toUpperCase();
     const colors = team ? getTeamColors(sport, team) : null;
 
     addToast('✨ Generating your card with AI…', 'success');
 
     const card = await generateLLMCard({
-      sport, myTeam: team, location, gameDate: new Date().toDateString(),
+      sport, myTeam: team,
+      opponentTeam: team === homeTeam ? awayTeam : homeTeam,
+      location, gameDate: new Date().toDateString(),
     });
 
     const players = {
       [playerId]: { name, team, colors, card, bingo: false, bingoLine: null, battleShots: 0 },
     };
 
-    // Spin up bot players
     for (let i = 0; i < (botCount || 0); i++) {
-      const botId  = `bot_${uuidv4().slice(0, 8)}`;
-      const bot    = createBotPlayer(i, sport);
+      const botId   = `bot_${uuidv4().slice(0, 8)}`;
+      const bot     = createBotPlayer(i, sport);
       const botCard = await generateLLMCard({
         sport, myTeam: bot.team, location, gameDate: new Date().toDateString(),
       });
@@ -166,7 +204,11 @@ export default function App() {
     }
 
     await set(ref(db, `rooms/${code}`), {
-      sport, location, createdAt: serverTimestamp(),
+      sport, location,
+      homeTeam: homeTeam || null,
+      awayTeam: awayTeam || null,
+      gameLabel: gameLabel || null,
+      createdAt: serverTimestamp(),
       status: 'waiting', host: playerId, players,
     });
 
@@ -188,6 +230,7 @@ export default function App() {
     addToast('✨ Generating your card with AI…', 'success');
     const card = await generateLLMCard({
       sport: roomSnap.sport, myTeam: team,
+      opponentTeam: roomSnap.awayTeam || roomSnap.homeTeam || null,
       location: roomSnap.location, gameDate: new Date().toDateString(),
     });
 
@@ -229,12 +272,43 @@ export default function App() {
       updates[`rooms/${roomCode}/players/${playerId}/bingoLine`] = bingoLine;
       addToast('🎉 BINGO! You won!', 'win');
       if (isBattleshipBingo(card, bingoLine, squareIndex)) {
-        updates[`rooms/${roomCode}/players/${playerId}/battleShots`] = (myPlayer.battleShots || 0) + 1;
+        updates[`rooms/${roomCode}/players/${playerId}/battleShots`] =
+          (myPlayer.battleShots || 0) + 1;
         addToast('⚡ Battleship BINGO! Battle Shot earned!', 'battle');
       }
     }
     await update(ref(db), updates);
   }, [roomData, playerId, roomCode, addToast]);
+
+  // ── UNMARK a square ───────────────────────────────────────────────────────
+  const handleUnmarkSquare = useCallback(async (squareIndex) => {
+    if (!roomData) return;
+    const myPlayer = roomData.players?.[playerId];
+    if (!myPlayer) return;
+
+    const card = myPlayer.card.map(sq => ({ ...sq }));
+    const sq   = card[squareIndex];
+
+    // Safety checks: can't unmark free, blocked, or winning-line squares
+    if (!sq || !sq.isMarked || sq.isFree || sq.isBlocked) return;
+    const bingoLine = myPlayer.bingoLine || [];
+    if (bingoLine.includes(squareIndex)) return;
+
+    card[squareIndex] = { ...sq, isMarked: false };
+
+    // Recheck bingo — might need to clear it if somehow bingo was partial
+    const { checkBingo } = await import('./data/bingoSquares.js');
+    const stillBingo = checkBingo(card);
+    const updates = { [`rooms/${roomCode}/players/${playerId}/card`]: card };
+
+    // If no bingo line remains and player had bingo, clear it
+    if (!stillBingo && myPlayer.bingo) {
+      updates[`rooms/${roomCode}/players/${playerId}/bingo`]     = false;
+      updates[`rooms/${roomCode}/players/${playerId}/bingoLine`] = null;
+    }
+
+    await update(ref(db), updates);
+  }, [roomData, playerId, roomCode]);
 
   // ── Fire battle shot ──────────────────────────────────────────────────────
   const handleBattleShot = useCallback(async (targetPlayerId, targetSquareIndex) => {
@@ -268,6 +342,7 @@ export default function App() {
   const handlePlayAgain = useCallback(() => {
     ['--team-primary','--team-secondary','--team-text','--team-primary-fade']
       .forEach(v => document.documentElement.style.removeProperty(v));
+    seenAttacks.current.clear();
     setScreen('lobby');
     setRoomCode('');
     setRoomData(null);
@@ -275,14 +350,21 @@ export default function App() {
     setPlayerTeam('');
     setTeamColors(null);
     setIsHost(false);
+    setChatMessages([]);
   }, []);
 
   return (
     <>
       <ToastContainer toasts={toasts} />
+
       {screen === 'lobby' && (
-        <Lobby onCreateRoom={handleCreateRoom} onJoinRoom={handleJoinRoom} llmStatus={llmStatus} />
+        <Lobby
+          onCreateRoom={handleCreateRoom}
+          onJoinRoom={handleJoinRoom}
+          llmStatus={llmStatus}
+        />
       )}
+
       {screen === 'waiting' && roomData && (
         <WaitingRoom
           roomCode={roomCode} roomData={roomData}
@@ -290,17 +372,22 @@ export default function App() {
           onStartGame={handleStartGame}
         />
       )}
+
       {screen === 'game' && roomData && (
         <GameBoard
-          roomCode={roomCode}    roomData={roomData}
-          playerId={playerId}    playerName={playerName}
+          roomCode={roomCode}   roomData={roomData}
+          playerId={playerId}   playerName={playerName}
           teamColors={teamColors}
-          gameInfo={gameInfo}    connectionStatus={connectionStatus}
+          gameInfo={gameInfo}   connectionStatus={connectionStatus}
+          chatMessages={chatMessages}
           onMarkSquare={handleMarkSquare}
+          onUnmarkSquare={handleUnmarkSquare}
           onBattleShot={handleBattleShot}
+          onSendChat={handleSendChat}
           addToast={addToast}
         />
       )}
+
       {screen === 'win' && (
         <WinScreen winner={winner} teamColors={teamColors} onPlayAgain={handlePlayAgain} />
       )}
