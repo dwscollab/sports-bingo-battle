@@ -161,31 +161,4 @@ Return ONLY a valid JSON array of exactly 24 objects. No markdown, no preamble:
   }
 });
 
-// ── /api/w3w-convert ──────────────────────────────────────────────────────
-app.post('/api/w3w-convert', async (req, res) => {
-  const w3wKey = process.env.W3W_API_KEY;
-  if (!w3wKey) {
-    return res.status(200).json({ available: false, reason: 'W3W_API_KEY not configured' });
-  }
-
-  const { words, lat, lng } = req.body;
-  try {
-    let url;
-    if (words) {
-      const cleaned = words.trim().replace(/^\/\/\//, '').replace(/\s+/g, '.').toLowerCase();
-      url = `https://api.what3words.com/v3/convert-to-coordinates?words=${encodeURIComponent(cleaned)}&key=${w3wKey}`;
-    } else if (lat && lng) {
-      url = `https://api.what3words.com/v3/convert-to-3wa?coordinates=${lat},${lng}&key=${w3wKey}`;
-    } else {
-      return res.status(400).json({ error: 'Provide either words or lat/lng' });
-    }
-    const response = await fetch(url);
-    const data = await response.json();
-    if (data.error) return res.status(400).json({ error: data.error.message, available: true });
-    res.json({ available: true, words: data.words, lat: data.coordinates?.lat, lng: data.coordinates?.lng, nearestPlace: data.nearestPlace || null });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.listen(3001, () => console.log('Dev API server on http://localhost:3001'));
