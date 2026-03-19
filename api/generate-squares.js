@@ -1,6 +1,5 @@
 // api/generate-squares.js
 // Vercel Serverless Function — proxies Anthropic API to keep key server-side
-// Deploy on Vercel: the ANTHROPIC_API_KEY env var is set in your Vercel project settings
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -12,32 +11,37 @@ export default async function handler(req, res) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not configured on server' });
   }
 
-  const { sport, myTeam, opponentTeam, location, gameDate } = req.body;
+  // homeTeam / awayTeam = the actual game being watched
+  // myTeam is intentionally ignored — it must not influence square generation
+  const { sport, homeTeam, awayTeam, location, gameDate } = req.body;
 
   const locationLabel = {
-    liveGame:  'a live arena/stadium game',
-    sportsBar: 'a sports bar',
-    home:      'home on TV/streaming',
+    liveGame:  'attending the live game at the arena/stadium',
+    sportsBar: 'watching at a sports bar',
+    home:      'watching at home on TV or streaming',
   }[location] || location;
 
-  const prompt = `You are a creative sports bingo card designer. Generate exactly 24 unique bingo squares for a ${sport} game.
+  // Build a clear matchup string — this is what the squares must be about
+  const matchup = homeTeam && awayTeam
+    ? `${awayTeam} at ${homeTeam}`
+    : homeTeam || awayTeam || `a ${sport} game`;
 
-Context:
-- Sport: ${sport}
-- My team: ${myTeam || 'unknown'}
-- Opponent: ${opponentTeam || 'unknown'}
-- Location: ${locationLabel}
-- Date: ${gameDate || new Date().toDateString()}
+  const prompt = `You are a creative sports bingo card designer. Generate exactly 24 unique bingo squares for a specific game.
 
-Requirements:
-1. Mix common/easy events AND rare/exciting moments
-2. Mark 4–6 squares as "battle: true" — these are the most dramatic, rare moments (fight, hat trick, penalty shot, overtime winner, etc.)
-3. Mark 3–5 squares as "camera: true" ONLY if location is liveGame or sportsBar — these are visually verifiable crowd/atmosphere moments (e.g., "Kiss Cam!" "Wave rolls through crowd" "Mascot spotted nearby" "Vendor passes your row")
-4. If location is "home", set ALL camera to false
-5. Be specific to the sport and teams where possible (mention team names/rivalries)
-6. Include: game action squares, crowd/atmosphere squares, broadcast/commentary squares, player behavior squares
-7. Keep each text under 32 characters
-8. Make them FUN and surprising — avoid generic obvious ones like just "Goal"
+THE GAME: ${matchup}
+Sport: ${sport}
+Date: ${gameDate || new Date().toDateString()}
+Viewer location: ${locationLabel}
+
+CRITICAL RULES — read carefully:
+1. ALL squares must be about events that could realistically happen in THIS specific game (${matchup}). Do NOT generate squares about teams not playing in this game.
+2. Where relevant, reference the actual teams by name: ${homeTeam || 'home team'} and ${awayTeam || 'away team'}.
+3. Mix easy/common events with rare exciting ones — not everything should be a longshot.
+4. Mark 4–6 squares as "battle: true" — these are dramatic rare moments specific to this sport (e.g. hat trick, penalty shot, fight, overtime goal, blocked penalty kick, slam dunk with foul).
+5. Mark 3–5 squares as "camera: true" ONLY when location is liveGame or sportsBar — these are visually provable crowd/atmosphere moments a person at the venue could photograph (e.g. "Kiss Cam!", "Wave rolls the arena", "Mascot high-fives a fan", "Zamboni wave"). If location is "home" set ALL camera to false.
+6. Keep each square text under 32 characters.
+7. Include a mix of: game-action squares, player-behavior squares, crowd/atmosphere squares, and broadcast/referee squares.
+8. Make them fun, specific, and memorable — avoid generic filler like just "Goal Scored".
 
 Return ONLY a valid JSON array of exactly 24 objects. No markdown, no preamble, no explanation:
 [{"text":"...","battle":false,"camera":false},...]`;
@@ -63,9 +67,7 @@ Return ONLY a valid JSON array of exactly 24 objects. No markdown, no preamble, 
     }
 
     const data = await response.json();
-    const raw = data.content?.[0]?.text ?? '';
-
-    // Strip any accidental markdown fences
+    const raw  = data.content?.[0]?.text ?? '';
     const clean = raw.replace(/```json|```/g, '').trim();
     const squares = JSON.parse(clean);
 

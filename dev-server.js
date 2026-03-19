@@ -17,27 +17,33 @@ app.post('/api/generate-squares', async (req, res) => {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in .env' });
   }
 
-  const { sport, myTeam, opponentTeam, location, gameDate } = req.body;
-  const locationLabel = { liveGame: 'a live arena/stadium game', sportsBar: 'a sports bar', home: 'home on TV/streaming' }[location] || location;
+  const { sport, homeTeam, awayTeam, location, gameDate } = req.body;  // myTeam intentionally excluded
+  const locationLabel = {
+    liveGame:  'attending the live game at the arena/stadium',
+    sportsBar: 'watching at a sports bar',
+    home:      'watching at home on TV or streaming',
+  }[location] || location;
 
-  const prompt = `You are a creative sports bingo card designer. Generate exactly 24 unique bingo squares for a ${sport} game.
+  const matchup = homeTeam && awayTeam
+    ? `${awayTeam} at ${homeTeam}`
+    : homeTeam || awayTeam || `a ${sport} game`;
 
-Context:
-- Sport: ${sport}
-- My team: ${myTeam || 'unknown'}
-- Opponent: ${opponentTeam || 'unknown'}
-- Location: ${locationLabel}
-- Date: ${gameDate || new Date().toDateString()}
+  const prompt = `You are a creative sports bingo card designer. Generate exactly 24 unique bingo squares for a specific game.
 
-Requirements:
-1. Mix common/easy events AND rare/exciting moments
-2. Mark 4–6 squares as "battle: true" — dramatic, rare moments (fight, hat trick, penalty shot, overtime winner, etc.)
-3. Mark 3–5 squares as "camera: true" ONLY if location is liveGame or sportsBar — visually verifiable crowd/atmosphere moments
-4. If location is "home", set ALL camera to false
-5. Be specific to the sport and teams where possible
-6. Include: game action, crowd/atmosphere, broadcast/commentary, and player behavior squares
-7. Keep each text under 32 characters
-8. Make them FUN and specific to the matchup
+THE GAME: ${matchup}
+Sport: ${sport}
+Date: ${gameDate || new Date().toDateString()}
+Viewer location: ${locationLabel}
+
+CRITICAL RULES:
+1. ALL squares must be about events that could realistically happen in THIS specific game (${matchup}). Do NOT generate squares about teams not playing in this game.
+2. Where relevant, reference the actual teams by name: ${homeTeam || 'home team'} and ${awayTeam || 'away team'}.
+3. Mix easy/common events with rare exciting ones.
+4. Mark 4-6 squares as "battle: true" — dramatic rare moments (hat trick, penalty shot, fight, overtime goal).
+5. Mark 3-5 squares as "camera: true" ONLY when location is liveGame or sportsBar — visually provable crowd moments a person at the venue could photograph. If location is home set ALL camera to false.
+6. Keep each square text under 32 characters.
+7. Include a mix of: game-action, player-behavior, crowd/atmosphere, and broadcast/referee squares.
+8. Make them fun, specific, and memorable.
 
 Return ONLY a valid JSON array of exactly 24 objects. No markdown, no preamble:
 [{"text":"...","battle":false,"camera":false},...]`;

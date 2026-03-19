@@ -2,10 +2,256 @@
 import { v4 as uuidv4 } from 'uuid';
 import { NHL_TEAMS, NFL_TEAMS, NBA_TEAMS } from './teamColors.js';
 
-const BOT_NAMES = [
-  'PuckBot 🤖', 'IceBot 🤖', 'SlappyBot 🤖', 'GoalieBot 🤖',
-  'RefBot 🤖', 'ZamboniBot 🤖', 'BoardBot 🤖', 'HatTrickBot 🤖',
+// ── Letterkenny characters ────────────────────────────────────────────────────
+
+export const LETTERKENNY_CHARACTERS = [
+  {
+    name: 'Wayne 🌾',
+    // Short, dry, decisive. "To be fair." "Hard no." "Figure it out."
+    // Rapid-fire insult chains, pitter patter.
+    idle: [
+      "To be fair.",
+      "Pitter patter, let's get at 'er.",
+      "Hard no.",
+      "Figure it out.",
+      "That's a Texas-sized 10-4.",
+      "You're spare parts, bud.",
+      "Ain't that the way she goes.",
+      "Give yer balls a tug.",
+      "That's a good problem to have.",
+      "How's yer father?",
+      "Thirty bucks is thirty bucks.",
+      "It's a hard life picking stones and pulling stumps.",
+    ],
+    winning: [
+      "Pitter patter, BINGO's done.",
+      "Figure it out. I did.",
+      "That's a Texas-sized 10-4 on that BINGO.",
+      "Hard yes on that one.",
+    ],
+    losing: [
+      "Well that ain't ideal.",
+      "Give yer balls a tug, I'll catch up.",
+      "To be fair, you got lucky.",
+      "Hard no on that result.",
+    ],
+    battleShot: [
+      "Blocked. You're spare parts, bud.",
+      "To be fair, you never saw that coming.",
+      "Give yer balls a tug, that square's gone.",
+      "That's a hard no on that square for ya.",
+    ],
+    markedSquare: [
+      "Pitter patter.",
+      "That's a 10-4.",
+      "Figure it out.",
+      "Yep.",
+    ],
+  },
+  {
+    name: 'Squirrelly Dan 🐿️',
+    // Adds "s" to random words. "I appreciates it." "What she saids was..."
+    // Malapropisms, word salad, oddly philosophical.
+    idle: [
+      "I appreciates it.",
+      "That's not what she said. What she saids was...",
+      "I finds that very interestings.",
+      "Allegedly.",
+      "Well I'll tells ya, the words is important.",
+      "She was a beaut, she was.",
+      "I'm not not sayin' it.",
+      "Now THAT is a good looks.",
+      "Allegedly she was very into it.",
+      "The things is, right, the things is...",
+      "Words is hard sometimes, bud.",
+    ],
+    winning: [
+      "I appreciates this BINGO very much.",
+      "That's not what she saids would happen but here we is.",
+      "Allegedly I just wins.",
+    ],
+    losing: [
+      "I finds that very disappointings.",
+      "Allegedly that squares was mine.",
+      "What she saids was I was gonna win.",
+    ],
+    battleShot: [
+      "I appreciates blockins that square.",
+      "That's not what she saids you'd wants.",
+      "Allegedly your square is mine now.",
+    ],
+    markedSquare: [
+      "I appreciates it.",
+      "Allegedly.",
+      "That's the ones.",
+      "Yeps.",
+    ],
+  },
+  {
+    name: 'Reilly 🏒',
+    // Hockey bro. "Ferda." "Bro." "Chel." "Chirpin'." "Titties." "Tilt."
+    // Everything is about hockey and being a bro.
+    idle: [
+      "Ferda boys!",
+      "Bro that was FILTHY.",
+      "Let's go bro, ferda!",
+      "Absolute beauty, bro.",
+      "Tilt! Full tilt!",
+      "That celly was sick bro.",
+      "Chel later bro?",
+      "Bro those mitts though.",
+      "Chirp city out here.",
+      "That's gross bro. Beauuutiful.",
+      "Rip it, bro. Top shelf where mama hides the cookies.",
+      "Boys, it's a puck drop situation. Ferda.",
+    ],
+    winning: [
+      "FERDA! BINGO bro!",
+      "Absolute filth, bro. Let's go!",
+      "Tilt! Full tilt BINGO!",
+      "That's beauty bro, beauty.",
+    ],
+    losing: [
+      "Bro that's a tilt situation.",
+      "Nah bro, that ain't ferda.",
+      "Full tilt disappointment bro.",
+    ],
+    battleShot: [
+      "CHIRP! Blocked that square bro!",
+      "Ferda blocking your square!",
+      "That's filthy bro. Beauty block.",
+    ],
+    markedSquare: [
+      "Ferda!",
+      "Beauty bro!",
+      "Filthy!",
+      "Let's go bro!",
+    ],
+  },
+  {
+    name: 'Jonesy 🏒',
+    // Reilly's twin energy. "Yo." "Yer not wrong." "Hardest working guy in the room."
+    // Same hockey bro dialect, slightly dumber.
+    idle: [
+      "Yo bro, let's go!",
+      "Yer not wrong.",
+      "I'm the hardest working guy in this room bro.",
+      "Bro I'm literally built different.",
+      "Yo that's nasty bro.",
+      "Bender alert! Bender alert!",
+      "My bad bro, my bad.",
+      "Yo I'm so tilted right now.",
+      "Bro that's a clapper from the point.",
+      "I'm not even sorry bro.",
+      "Snipe city population me.",
+      "Yo Reilly— oh wait it's just us.",
+    ],
+    winning: [
+      "YO! BINGO! I'm literally built different!",
+      "Yer not wrong — I just won!",
+      "Hardest working guy in the room WINS!",
+    ],
+    losing: [
+      "Yo I'm so tilted bro.",
+      "My bad, my bad, my bad.",
+      "Bro I am a bender right now.",
+    ],
+    battleShot: [
+      "Yo blocked! Snipe city population me!",
+      "Bro your square is DONE. My bad not my bad.",
+      "Yer not wrong that I just blocked that.",
+    ],
+    markedSquare: [
+      "Yo!",
+      "Snipe!",
+      "Yer not wrong!",
+      "Built different!",
+    ],
+  },
+  {
+    name: 'Katy 💅',
+    // Wayne's sister. Confident, sharp, not taking anyone's shit.
+    // "Ohhh, let's go." Short devastating reads of other players.
+    idle: [
+      "Ohhh, let's go.",
+      "That's not a good look.",
+      "Pull up.",
+      "Oh, you're struggling.",
+      "Don't embarrass yourself.",
+      "Hard pass.",
+      "Oh honey.",
+      "That's unfortunate.",
+      "Cool it, bud.",
+      "Get it together.",
+      "You call that playing?",
+    ],
+    winning: [
+      "Ohhh, let's go. BINGO.",
+      "Obviously.",
+      "Did anyone expect differently?",
+      "Pull up, I won.",
+    ],
+    losing: [
+      "That's not a good look.",
+      "We don't talk about this.",
+      "I'm choosing not to acknowledge that.",
+    ],
+    battleShot: [
+      "Pull up — that square's blocked.",
+      "Oh honey, not that square.",
+      "That's not a good look for you.",
+    ],
+    markedSquare: [
+      "Obviously.",
+      "Pull up.",
+      "Let's go.",
+      "Mmhm.",
+    ],
+  },
+  {
+    name: 'Stewart 🧪',
+    // Drug-fueled intellectual. Scottish accent, big words, non sequiturs.
+    // "Allegedly." "I would like to purchase some marijuana."
+    idle: [
+      "Allegedly.",
+      "I've been known to partake.",
+      "Intellectually speaking, this game is stimulating.",
+      "I find this development most intriguing.",
+      "The puck, she is a metaphor.",
+      "Allegedly I'm winning.",
+      "My cerebral cortex is fully engaged.",
+      "This is making me want to eat an entire pizza.",
+      "I am… considerably high right now.",
+      "Allegedly none of this is real.",
+      "The squares, they speak to me.",
+      "I would like to purchase some more of this game.",
+    ],
+    winning: [
+      "Allegedly I have achieved BINGO.",
+      "My intellectual superiority is confirmed.",
+      "The squares told me this would happen.",
+      "Considerably excellent outcome.",
+    ],
+    losing: [
+      "Allegedly that square was rigged.",
+      "I find this outcome… unsatisfying.",
+      "I am too high for this result.",
+    ],
+    battleShot: [
+      "Allegedly your square no longer exists.",
+      "I find blocking most intellectually satisfying.",
+      "The square is gone. Allegedly.",
+    ],
+    markedSquare: [
+      "Allegedly.",
+      "Intriguing.",
+      "As expected.",
+      "Mmyes.",
+    ],
+  },
 ];
+
+// ── Team pools ────────────────────────────────────────────────────────────────
 
 const BOT_TEAM_POOLS = {
   hockey: Object.keys(NHL_TEAMS),
@@ -13,37 +259,43 @@ const BOT_TEAM_POOLS = {
   nba:    Object.keys(NBA_TEAMS),
 };
 
-/**
- * Creates a bot player object for Firebase.
- * @param {number} index - 0, 1, or 2
- * @param {string} sport
- * @param {string} [preferredTeamAbbr] - optional opponent team to root for
- */
+// ── createBotPlayer ───────────────────────────────────────────────────────────
+
 export function createBotPlayer(index, sport, preferredTeamAbbr) {
-  const teamPool = BOT_TEAM_POOLS[sport] || BOT_TEAM_POOLS.hockey;
-  const teamAbbr = preferredTeamAbbr || teamPool[Math.floor(Math.random() * teamPool.length)];
-  const teamMap  = { hockey: NHL_TEAMS, nfl: NFL_TEAMS, nba: NBA_TEAMS }[sport] || NHL_TEAMS;
-  const team     = teamMap[teamAbbr];
+  const character = LETTERKENNY_CHARACTERS[index % LETTERKENNY_CHARACTERS.length];
+  const teamPool  = BOT_TEAM_POOLS[sport] || BOT_TEAM_POOLS.hockey;
+  const teamAbbr  = preferredTeamAbbr || teamPool[Math.floor(Math.random() * teamPool.length)];
+  const teamMap   = { hockey: NHL_TEAMS, nfl: NFL_TEAMS, nba: NBA_TEAMS }[sport] || NHL_TEAMS;
+  const team      = teamMap[teamAbbr];
 
   return {
-    name:        BOT_NAMES[index % BOT_NAMES.length],
-    team:        teamAbbr,
-    colors:      team ? { primary: team.primary, secondary: team.secondary, text: team.text, name: team.name } : null,
-    bingo:       false,
-    bingoLine:   null,
-    battleShots: 0,
-    isBot:       true,
-    botId:       uuidv4().slice(0, 8),
-    card:        null, // set after card generation
+    name:            character.name,
+    characterIndex:  index % LETTERKENNY_CHARACTERS.length,
+    team:            teamAbbr,
+    colors:          team
+      ? { primary: team.primary, secondary: team.secondary, text: team.text, name: team.name }
+      : null,
+    bingo:           false,
+    bingoLine:       null,
+    battleShots:     0,
+    isBot:           true,
+    botId:           uuidv4().slice(0, 8),
+    card:            null,
   };
 }
 
-/**
- * Bot AI tick — decides what the bot does next.
- * Called periodically by the host's useEffect.
- *
- * Returns a list of actions: { type: 'mark' | 'battleShot', ... }
- */
+// ── getBotChatLine ────────────────────────────────────────────────────────────
+// Returns a contextual Letterkenny line for the given trigger.
+// trigger: 'idle' | 'winning' | 'losing' | 'battleShot' | 'markedSquare'
+
+export function getBotChatLine(characterIndex, trigger) {
+  const char = LETTERKENNY_CHARACTERS[characterIndex % LETTERKENNY_CHARACTERS.length];
+  const pool = char[trigger] || char.idle;
+  return pool[Math.floor(Math.random() * pool.length)];
+}
+
+// ── botTick ───────────────────────────────────────────────────────────────────
+
 export function botTick(botPlayer, allPlayers, playerId) {
   if (!botPlayer?.card || botPlayer.bingo) return [];
   const actions = [];
@@ -55,13 +307,13 @@ export function botTick(botPlayer, allPlayers, playerId) {
 
   if (unmarked.length === 0) return actions;
 
-  // ~25% chance per tick to mark a random unmarked square
+  // ~25% chance to mark a square
   if (Math.random() < 0.25) {
     const pick = unmarked[Math.floor(Math.random() * unmarked.length)];
     actions.push({ type: 'mark', squareIndex: pick.idx });
   }
 
-  // ~15% chance to fire a battle shot if the bot has one
+  // ~15% chance to fire a battle shot
   if (botPlayer.battleShots > 0 && Math.random() < 0.15) {
     const humanPlayers = Object.entries(allPlayers).filter(
       ([pid, p]) => pid !== playerId && !p.isBot && !p.bingo
@@ -74,7 +326,12 @@ export function botTick(botPlayer, allPlayers, playerId) {
 
       if (targetUnmarked.length > 0) {
         const sq = targetUnmarked[Math.floor(Math.random() * targetUnmarked.length)];
-        actions.push({ type: 'battleShot', targetPlayerId: targetPid, targetSquareIndex: sq.idx, targetPlayerName: targetP.name });
+        actions.push({
+          type: 'battleShot',
+          targetPlayerId: targetPid,
+          targetSquareIndex: sq.idx,
+          targetPlayerName: targetP.name,
+        });
       }
     }
   }
@@ -82,9 +339,8 @@ export function botTick(botPlayer, allPlayers, playerId) {
   return actions;
 }
 
-/**
- * Check bingo for a card (simple version for bot use).
- */
+// ── checkBotBingo ─────────────────────────────────────────────────────────────
+
 export function checkBotBingo(card) {
   const SIZE = 5;
   const lines = [];

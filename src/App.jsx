@@ -14,7 +14,7 @@ import { useNHLFeed }    from './hooks/useNHLFeed.js';
 import { useLLMSquares } from './hooks/useLLMSquares.js';
 import { useAIPlayer }   from './hooks/useAIPlayer.js';
 import { getTeamColors, buildTeamTheme } from './data/teamColors.js';
-import { createBotPlayer } from './data/botPlayers.js';
+import { createBotPlayer, getBotChatLine } from './data/botPlayers.js';
 
 export default function App() {
   const [screen,      setScreen]      = useState('lobby');
@@ -32,7 +32,9 @@ export default function App() {
   const [winner,      setWinner]      = useState(null);
   const [isHost,      setIsHost]      = useState(false);
   const [chatMessages,setChatMessages]= useState([]);
-  const seenAttacks = useRef(new Set());
+  const seenAttacks   = useRef(new Set());
+  const botChatTimer  = useRef(null);
+  const lastBotChat   = useRef({});   // botId → timestamp, prevents spam
 
   const { generateLLMCard, status: llmStatus } = useLLMSquares();
   const sport = roomData?.sport ?? 'hockey';
@@ -113,6 +115,95 @@ export default function App() {
     humanPlayerId: playerId,
   });
 
+  // ── Bot chat tick (host only) — Letterkenny characters talk trash ─────────
+  useEffect(() => {
+    if (!isHost || screen !== 'game' || !roomCode) return;
+
+    const BOT_CHAT_INTERVAL_MS = 28_000; // ~every 28 seconds per bot
+    const BOT_CHAT_COOLDOWN_MS = 45_000; // each bot won't spam faster than this
+
+    const tick = async () => {
+      const players = roomData?.players || {};
+      const bots = Object.entries(players).filter(([, p]) => p.isBot);
+      if (bots.length === 0) return;
+
+      const now = Date.now();
+
+      for (const [botId, bot] of bots) {
+        // Cooldown check — each bot has its own cooldown
+        const lastTime = lastBotChat.current[botId] || 0;
+        if (now - lastTime < BOT_CHAT_COOLDOWN_MS) continue;
+
+        // ~45% chance per tick per bot to say something
+        if (Math.random() > 0.45) continue;
+
+        // Pick a trigger based on game state
+        const charIdx = bot.characterIndex ?? 0;
+        let trigger = 'idle';
+
+        if (bot.bingo) {
+          trigger = 'winning';
+        } else {
+          // Check if a human just got ahead
+          const humanPlayers = Object.entries(players).filter(([pid, p]) => !p.isBot);
+          const humanLeading = humanPlayers.some(([, p]) => {
+            const theirMarked = (p.card || []).filter(sq => sq?.isMarked && !sq?.isFree).length;
+            const botMarked   = (bot.card  || []).filter(sq => sq?.isMarked && !sq?.isFree).length;
+            return theirMarked > botMarked + 3;
+          });
+          if (humanLeading) trigger = 'losing';
+        }
+
+        const line = getBotChatLine(charIdx, trigger);
+
+        try {
+          await push(ref(db, `rooms/${roomCode}/chat`), {
+            name:      bot.name,
+            text:      line,
+            timestamp: now,
+            colors:    bot.colors
+              ? { primary: bot.colors.primary, text: bot.colors.text }
+              : null,
+            isBot: true,
+          });
+          lastBotChat.current[botId] = now;
+        } catch (err) {
+          console.warn('Bot chat push failed:', err.message);
+        }
+      }
+    };
+
+    botChatTimer.current = setInterval(tick, BOT_CHAT_INTERVAL_MS);
+    return () => clearInterval(botChatTimer.current);
+  }, [isHost, screen, roomCode, roomData]);
+
+  // Also fire a contextual bot line when a bot fires a battle shot (called from
+  // useAIPlayer's attack resolution) — we listen for new resolved attacks targeting
+  // a human and let the attacker bot respond in chat.
+  useEffect(() => {
+    if (!isHost || !roomData || screen !== 'game') return;
+    const attacks = roomData.attacks || {};
+    for (const [, atk] of Object.entries(attacks)) {
+      if (!atk.resolved || !atk.from?.startsWith('bot_')) continue;
+      const attackKey = `${atk.from}_${atk.timestamp}`;
+      if (lastBotChat.current[attackKey]) continue; // already handled
+      lastBotChat.current[attackKey] = Date.now();
+
+      const bot = roomData.players?.[atk.from];
+      if (!bot) continue;
+      const charIdx = bot.characterIndex ?? 0;
+      const line = getBotChatLine(charIdx, 'battleShot');
+
+      push(ref(db, `rooms/${roomCode}/chat`), {
+        name:      bot.name,
+        text:      line,
+        timestamp: Date.now(),
+        colors:    bot.colors ? { primary: bot.colors.primary, text: bot.colors.text } : null,
+        isBot:     true,
+      }).catch(() => {});
+    }
+  }, [isHost, roomData?.attacks, screen, roomCode, roomData]);
+
   // ── Firebase: room + chat listener ───────────────────────────────────────
   useEffect(() => {
     if (!roomCode) return;
@@ -184,8 +275,7 @@ export default function App() {
     addToast('✨ Generating your card with AI…', 'success');
 
     const card = await generateLLMCard({
-      sport, myTeam: team,
-      opponentTeam: team === homeTeam ? awayTeam : homeTeam,
+      sport, homeTeam, awayTeam,
       location, gameDate: new Date().toDateString(),
     });
 
@@ -197,7 +287,8 @@ export default function App() {
       const botId   = `bot_${uuidv4().slice(0, 8)}`;
       const bot     = createBotPlayer(i, sport);
       const botCard = await generateLLMCard({
-        sport, myTeam: bot.team, location, gameDate: new Date().toDateString(),
+        sport, homeTeam, awayTeam,
+        location, gameDate: new Date().toDateString(),
       });
       bot.card = botCard;
       players[botId] = bot;
@@ -229,8 +320,9 @@ export default function App() {
 
     addToast('✨ Generating your card with AI…', 'success');
     const card = await generateLLMCard({
-      sport: roomSnap.sport, myTeam: team,
-      opponentTeam: roomSnap.awayTeam || roomSnap.homeTeam || null,
+      sport: roomSnap.sport,
+      homeTeam: roomSnap.homeTeam || null,
+      awayTeam: roomSnap.awayTeam || null,
       location: roomSnap.location, gameDate: new Date().toDateString(),
     });
 
@@ -343,6 +435,8 @@ export default function App() {
     ['--team-primary','--team-secondary','--team-text','--team-primary-fade']
       .forEach(v => document.documentElement.style.removeProperty(v));
     seenAttacks.current.clear();
+    lastBotChat.current = {};
+    clearInterval(botChatTimer.current);
     setScreen('lobby');
     setRoomCode('');
     setRoomData(null);
