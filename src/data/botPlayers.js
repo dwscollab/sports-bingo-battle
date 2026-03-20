@@ -353,3 +353,81 @@ export function checkBotBingo(card) {
   }
   return null;
 }
+
+// ── getMentionResponse ────────────────────────────────────────────────────────
+// Called when a player @mentions a bot in chat.
+// Returns a contextual Letterkenny reply directed at the tagger.
+
+const MENTION_RESPONSES = [
+  // index 0 — Wayne
+  [
+    "To be fair, you're gonna wanna pick yer battles.",
+    "Figure it out, bud.",
+    "Hard no on whatever you're implying.",
+    "That's a Texas-sized 10-4, not interested.",
+    "Give yer balls a tug. You called?",
+    "Pitter patter. What do ya want?",
+    "You're spare parts, but I'm listenin'.",
+    "Thirty bucks says you regret taggin' me.",
+  ],
+  // index 1 — Squirrelly Dan
+  [
+    "I appreciates the mentions, I really does.",
+    "What she saids was… you shouldn't oughts tag me like that.",
+    "I finds that very interestings that you'd tag me.",
+    "Allegedly I was mentioned.",
+    "Well I'll tells ya, I hears my name.",
+    "That's not what she saids would happen when you tags someone.",
+    "I appreciates it. Truly I does.",
+    "The words is: I hears ya.",
+  ],
+  // index 2 — Reilly
+  [
+    "YO bro you tagged me! Ferda!",
+    "Bro what do you want I'm watching the game!",
+    "You called? Let's go bro, ferda!",
+    "Bro I am LOCKED IN right now and you're tagging me?",
+    "Absolute chirp bro. What do you want?",
+    "Yo I see you. Ferda. What's up?",
+    "Bro I'm tilted you tagged me during a PP.",
+    "YO. Present. What. Ferda.",
+  ],
+  // index 3 — Jonesy
+  [
+    "Yo bro I'm here! Yer not wrong to tag me!",
+    "YO. I'm literally built different and you noticed.",
+    "Bro I heard my name, what's good?",
+    "Yo my bad, I was watching the game. What?",
+    "Yer not wrong that I'm here bro.",
+    "Bro you tagged me! I'm so hyped right now!",
+    "Yo Reilly — oh wait, you tagged me. What's up bro?",
+    "Yo I'm here bro. Built different and ready to chat.",
+  ],
+  // index 4 — Katy
+  [
+    "You rang?",
+    "I'm busy. What.",
+    "Oh, it's you. What do you want.",
+    "Pull up. I'm listening.",
+    "You tagged me. Bold move. Talk.",
+    "This better be worth interrupting me.",
+    "Oh honey. What is it.",
+    "I'm here. Don't waste it.",
+  ],
+  // index 5 — Stewart
+  [
+    "Allegedly I was mentioned.",
+    "I find your tag most intellectually stimulating.",
+    "I was… considerably elsewhere. You called?",
+    "Allegedly my name was invoked.",
+    "I am present. Allegedly.",
+    "My cerebral cortex registered your mention.",
+    "Allegedly I heard that.",
+    "I would like to formally acknowledge your tag.",
+  ],
+];
+
+export function getMentionResponse(characterIndex) {
+  const pool = MENTION_RESPONSES[characterIndex % MENTION_RESPONSES.length];
+  return pool[Math.floor(Math.random() * pool.length)];
+}

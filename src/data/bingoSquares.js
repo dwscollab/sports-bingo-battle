@@ -230,8 +230,15 @@ export const FREE_SPACE = {
   text: '⭐ FREE',
   battle: false,
   isFree: true,
-  isMarked: true,
+  isMarked: false,   // NOT auto-marked — only earned when your team wins
   isBlocked: false,
+};
+
+// The FREE space label changes based on whether team has won yet
+export const FREE_SPACE_WON = {
+  ...FREE_SPACE,
+  isMarked: true,
+  text: '⭐ YOUR TEAM WON!',
 };
 
 /**
@@ -266,7 +273,7 @@ export function generateCard(sport, location) {
   return card.map((sq, idx) => ({
     ...sq,
     index: idx,
-    isMarked: sq.isFree || false,
+    isMarked: sq.isFree ? false : false,  // FREE starts unmarked
     isBlocked: false,
   }));
 }

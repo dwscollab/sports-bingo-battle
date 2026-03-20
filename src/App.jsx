@@ -9,13 +9,16 @@ import Lobby          from './components/Lobby.jsx';
 import WaitingRoom    from './components/WaitingRoom.jsx';
 import GameBoard      from './components/GameBoard.jsx';
 import WinScreen            from './components/WinScreen.jsx';
+import IcingChallenge       from './components/IcingChallenge.jsx';
+import TruthOrDare          from './components/TruthOrDare.jsx';
 import PeopleWatchingSetup  from './components/PeopleWatchingSetup.jsx';
 import ToastContainer from './components/ToastContainer.jsx';
 import { useNHLFeed }    from './hooks/useNHLFeed.js';
+import { matchesSquare } from './data/nhlEventMap.js';
 import { useLLMSquares } from './hooks/useLLMSquares.js';
 import { useAIPlayer }   from './hooks/useAIPlayer.js';
 import { getTeamColors, buildTeamTheme } from './data/teamColors.js';
-import { createBotPlayer, getBotChatLine } from './data/botPlayers.js';
+import { createBotPlayer, getBotChatLine, getMentionResponse } from './data/botPlayers.js';
 
 export default function App() {
   const [screen,      setScreen]      = useState('lobby');
@@ -34,7 +37,9 @@ export default function App() {
   const [isHost,      setIsHost]      = useState(false);
   const [showPeopleWatching, setShowPeopleWatching] = useState(false);
   const [chatMessages,setChatMessages]= useState([]);
+  const [activeIcing,  setActiveIcing]  = useState(null); // live icing challenge
   const seenAttacks   = useRef(new Set());
+  const seenIcingIds  = useRef(new Set());
   const botChatTimer  = useRef(null);
   const lastBotChat   = useRef({});   // botId → timestamp, prevents spam
 
@@ -57,59 +62,151 @@ export default function App() {
       .forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
   }, [playerTeam, sport]);
 
-  // ── NHL feed — use myTeam or homeTeam for tracking ────────────────────────
-  const trackTeam = playerTeam || roomData?.homeTeam || '';
-  const { gameInfo, autoMarkPatterns, clearAutoMark, connectionStatus } = useNHLFeed({
-    sport, myTeamAbbr: trackTeam, enabled: screen === 'game',
+  // ── NHL feed — track the actual game teams set by the host ───────────────
+  const { gameInfo, autoMarkPatterns, clearAutoMark, feedEvents, clearFeedEvents, icingEvent, clearIcingEvent, connectionStatus, gameWon, reprocessAllPlays } = useNHLFeed({
+    sport,
+    homeTeamAbbr: roomData?.homeTeam || '',
+    awayTeamAbbr: roomData?.awayTeam || '',
+    myTeamAbbr:   playerTeam || '',   // fallback only if host set no teams
+    enabled: screen === 'game',
   });
 
   // ── Auto-mark from NHL feed ───────────────────────────────────────────────
   useEffect(() => {
     if (!autoMarkPatterns.length || !roomData) return;
-    const myPlayer = roomData.players?.[playerId];
+    const allPlayers = roomData.players || {};
+    const myPlayer   = allPlayers[playerId];
     if (!myPlayer?.card) return;
 
-    const card = myPlayer.card.map(sq => ({ ...sq }));
-    let changed = false;
-    const markedTexts = [];
+    import('./data/bingoSquares.js').then(({ checkBingo, isBattleshipBingo }) => {
+      const updates = {};
+      const markedTexts = [];
 
-    for (const pattern of autoMarkPatterns) {
-      const lower = pattern.toLowerCase();
-      card.forEach((sq, idx) => {
-        if (sq.isMarked || sq.isBlocked || sq.isFree) return;
-        if (sq.text.toLowerCase().includes(lower)) {
-          card[idx] = { ...sq, isMarked: true };
-          changed = true;
-          markedTexts.push(sq.text);
+      // ── Update every player's card (human + bots) ──────────────────────────
+      // Bots only get updated by the host to avoid duplicate writes
+      for (const [pid, player] of Object.entries(allPlayers)) {
+        const isBotPlayer = !!player.isBot;
+        const isMe        = pid === playerId;
+
+        // Only the host processes bot cards; everyone processes their own
+        if (isBotPlayer && !isHost) continue;
+        if (!player.card) continue;
+
+        const card = player.card.map(sq => ({ ...sq }));
+        let changed = false;
+
+        for (const pattern of autoMarkPatterns) {
+          card.forEach((sq, idx) => {
+            if (sq.isMarked || sq.isBlocked || sq.isFree) return;
+            if (matchesSquare(sq.text, pattern)) {
+              card[idx] = { ...sq, isMarked: true };
+              changed = true;
+              if (isMe) markedTexts.push(sq.text);
+            }
+          });
         }
-      });
-    }
 
-    if (changed) {
-      import('./data/bingoSquares.js').then(({ checkBingo, isBattleshipBingo }) => {
+        if (!changed) continue;
+
+        updates[`rooms/${roomCode}/players/${pid}/card`] = card;
+
         const bingoLine = checkBingo(card);
-        const updates = { [`rooms/${roomCode}/players/${playerId}/card`]: card };
-        if (bingoLine && !myPlayer.bingo) {
-          updates[`rooms/${roomCode}/players/${playerId}/bingo`]     = true;
-          updates[`rooms/${roomCode}/players/${playerId}/bingoLine`] = bingoLine;
-          addToast('🎉 BINGO! You won!', 'win');
-          const lastIdx = card.findLastIndex((sq, i) =>
-            bingoLine.includes(i) && sq.isMarked
-          );
-          if (isBattleshipBingo(card, bingoLine, lastIdx)) {
-            updates[`rooms/${roomCode}/players/${playerId}/battleShots`] =
-              (myPlayer.battleShots || 0) + 1;
-            addToast('⚡ Battleship BINGO! Battle Shot earned!', 'battle');
+        if (bingoLine && !player.bingo) {
+          updates[`rooms/${roomCode}/players/${pid}/bingo`]     = true;
+          updates[`rooms/${roomCode}/players/${pid}/bingoLine`] = bingoLine;
+
+          if (isMe) {
+            addToast('🎉 BINGO! You won!', 'win');
+            const lastIdx = card.findLastIndex((sq, i) =>
+              bingoLine.includes(i) && sq.isMarked
+            );
+            if (isBattleshipBingo(card, bingoLine, lastIdx)) {
+              updates[`rooms/${roomCode}/players/${pid}/battleShots`] =
+                (player.battleShots || 0) + 1;
+              addToast('⚡ Battleship BINGO! Battle Shot earned!', 'battle');
+            }
+          } else if (isBotPlayer) {
+            addToast(`🤖 ${player.name} got BINGO!`, 'battle');
           }
         }
-        update(ref(db), updates);
-      });
-      markedTexts.forEach(t => addToast(`🏒 Auto-marked: "${t}"`, 'success'));
-    }
-    clearAutoMark();
-  }, [autoMarkPatterns, roomData, playerId, roomCode, addToast, clearAutoMark]);
+      }
 
-  // ── Bot AI (host only) ────────────────────────────────────────────────────
+      if (Object.keys(updates).length > 0) update(ref(db), updates);
+      markedTexts.forEach(t => addToast(`🏒 Auto-marked: "${t}"`, 'success'));
+    });
+
+    clearAutoMark();
+  }, [autoMarkPatterns, roomData, playerId, roomCode, isHost, addToast, clearAutoMark]);
+
+  // ── Trigger icing selfie challenge when icing is called ─────────────────────
+  useEffect(() => {
+    if (!icingEvent || !isHost || screen !== 'game') return;
+    if (seenIcingIds.current.has(icingEvent.eventId)) return; // already triggered
+    seenIcingIds.current.add(icingEvent.eventId);
+
+    setActiveIcing(icingEvent);
+    clearIcingEvent();
+
+    const now = Date.now();
+
+    // Announce in chat
+    push(ref(db, `rooms/${roomCode}/chat`), {
+      name: '🧊 Icing Challenge',
+      text: '🧊 ICING CALLED! Selfie challenge — last to post loses a marked square! 60 seconds! 📸',
+      timestamp: now, isFeed: true,
+      colors: { primary: '#003060', text: '#99d9d9' },
+    }).catch(() => {});
+
+    // Bots auto-submit immediately with a small random delay (they have cameras 🤖)
+    const players = roomData?.players || {};
+    const bots = Object.entries(players).filter(([, p]) => p.isBot);
+    for (const [botId, bot] of bots) {
+      const delay = 2000 + Math.random() * 8000; // 2-10 seconds
+      setTimeout(() => {
+        update(ref(db, `rooms/${roomCode}/icingSubmissions/${botId}`), {
+          timestamp: Date.now(), name: bot.name,
+        });
+        push(ref(db, `rooms/${roomCode}/chat`), {
+          name: bot.name,
+          text: `🤖📸 ${bot.name} posts their selfie (allegedly)`,
+          timestamp: Date.now(),
+          colors: bot.colors ? { primary: bot.colors.primary, text: bot.colors.text } : null,
+          isBot: true,
+        });
+      }, delay);
+    }
+
+    // Write icing challenge to Firebase so all players see the banner
+    import('firebase/database').then(({ ref: fbRef, set }) => {
+      set(fbRef(db, `rooms/${roomCode}/icingChallenge`), {
+        eventId:   icingEvent.eventId,
+        startedAt: now,
+        period:    icingEvent.period,
+      });
+    });
+  }, [icingEvent, isHost, screen, roomCode, activeIcing, clearIcingEvent]);
+
+  // ── Post NHL feed events to chat (host only — avoids duplicate posts) ──────
+  useEffect(() => {
+    if (!feedEvents.length || !roomCode || !isHost || screen !== 'game') return;
+
+    const postEvents = async () => {
+      for (const line of feedEvents) {
+        await push(ref(db, `rooms/${roomCode}/chat`), {
+          name:      '🏒 NHL Feed',
+          text:      line,
+          timestamp: Date.now(),
+          isFeed:    true,
+          colors:    { primary: '#1a3a5c', text: '#99d9d9' },
+        });
+      }
+    };
+
+    postEvents();
+    clearFeedEvents();
+  }, [feedEvents, roomCode, isHost, screen, clearFeedEvents]);
+
+
   useAIPlayer({
     roomCode, roomData, autoMarkPatterns,
     clearAutoMark: () => {},
@@ -232,18 +329,38 @@ export default function App() {
       }
     });
 
+    // Icing challenge (for non-host players who need to see the banner)
+    const icingRef = ref(db, `rooms/${roomCode}/icingChallenge`);
+    const icingHandle = onValue(icingRef, snap => {
+      if (!snap.exists()) { setActiveIcing(null); return; }
+      const data = snap.val();
+      if (!isHost) setActiveIcing(data); // host sets it locally, others get it from Firebase
+    });
+
     // Chat
     const chatRef = ref(db, `rooms/${roomCode}/chat`);
+    const seenChats = new Set();
     const chatHandle = onValue(chatRef, snap => {
       if (!snap.exists()) { setChatMessages([]); return; }
       const msgs = Object.values(snap.val())
         .sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
       setChatMessages(msgs);
+
+      // Toast when someone @mentions this player
+      for (const msg of msgs) {
+        const key = `${msg.timestamp}_${msg.name}`;
+        if (seenChats.has(key)) continue;
+        seenChats.add(key);
+        if (msg.name === playerName) continue; // own message
+        if (!msg.text?.toLowerCase().includes(`@${playerName.toLowerCase()}`)) continue;
+        addToast(`💬 ${msg.name} mentioned you!`, 'battle');
+      }
     });
 
     return () => {
       off(roomRef,  'value', roomHandle);
       off(chatRef,  'value', chatHandle);
+      off(icingRef, 'value', icingHandle);
     };
   }, [roomCode, playerId, winner, addToast]);
 
@@ -252,19 +369,149 @@ export default function App() {
     if (roomData?.status === 'playing' && screen === 'waiting') setScreen('game');
   }, [roomData?.status, screen]);
 
-  // ── Send chat message ─────────────────────────────────────────────────────
+  // ── Post selfie for icing challenge ──────────────────────────────────────────
+  const handlePostSelfie = useCallback(async (imageDataUrl) => {
+    if (!roomCode || !playerName) return;
+    const myPlayer = roomData?.players?.[playerId];
+    const colors = myPlayer?.colors
+      ? { primary: myPlayer.colors.primary, text: myPlayer.colors.text }
+      : null;
+
+    // Post to chat — imageDataUrl may be null if camera was denied
+    const chatMsg = {
+      name: playerName,
+      text: imageDataUrl ? `📸 ${playerName}'s icing selfie!` : `📸 ${playerName} submitted (no camera)`,
+      timestamp: Date.now(),
+      colors,
+      isSelfie: !!imageDataUrl,
+    };
+    if (imageDataUrl) chatMsg.selfieDataUrl = imageDataUrl;
+
+    await push(ref(db, `rooms/${roomCode}/chat`), chatMsg);
+
+    // Record submission time for penalty adjudication
+    await update(ref(db, `rooms/${roomCode}/icingSubmissions/${playerId}`), {
+      timestamp: Date.now(), name: playerName,
+    });
+  }, [roomCode, playerName, roomData, playerId]);
+
+  // ── Adjudicate icing challenge — reads FRESH from Firebase to avoid stale state
+  const handleIcingAdjudicate = useCallback(async () => {
+    if (!roomCode) return null;
+
+    // Fetch current submissions and players fresh from Firebase
+    const [playersSnap, submissionsSnap] = await Promise.all([
+      get(ref(db, `rooms/${roomCode}/players`)),
+      get(ref(db, `rooms/${roomCode}/icingSubmissions`)),
+    ]);
+
+    const players     = playersSnap.exists()     ? playersSnap.val()     : {};
+    const submissions = submissionsSnap.exists() ? submissionsSnap.val() : {};
+
+    // Find the human who submitted last (or not at all)
+    const humanPlayers = Object.entries(players)
+      .filter(([, p]) => !p.isBot)
+      .map(([pid, p]) => ({
+        pid, name: p.name,
+        submitTime: submissions[pid]?.timestamp ?? Infinity,
+      }))
+      .sort((a, b) => b.submitTime - a.submitTime); // last/non-submitter first
+
+    const loser = humanPlayers[0];
+    if (!loser || loser.submitTime === Infinity && Object.keys(submissions).length >= humanPlayers.length) {
+      // Everyone submitted — no penalty
+      push(ref(db, `rooms/${roomCode}/chat`), {
+        name: '🧊 Icing Challenge', text: '❄️ Everyone posted in time! No penalty.',
+        timestamp: Date.now(), isFeed: true,
+        colors: { primary: '#003060', text: '#99d9d9' },
+      }).catch(() => {});
+      import('firebase/database').then(({ ref: fbRef, remove }) => {
+        remove(fbRef(db, `rooms/${roomCode}/icingChallenge`));
+        remove(fbRef(db, `rooms/${roomCode}/icingSubmissions`));
+      });
+      setActiveIcing(null);
+      return null;
+    }
+
+    // Penalize the loser
+    const player = players[loser.pid];
+    if (!player?.card) return null;
+
+    const bingoLine  = player.bingoLine || [];
+    const candidates = player.card
+      .map((sq, idx) => ({ sq, idx }))
+      .filter(({ sq, idx }) => sq.isMarked && !sq.isFree && !bingoLine.includes(idx));
+
+    if (candidates.length > 0) {
+      const pick    = candidates[Math.floor(Math.random() * candidates.length)];
+      const newCard = player.card.map(sq => ({ ...sq }));
+      newCard[pick.idx] = { ...newCard[pick.idx], isMarked: false };
+
+      await update(ref(db, `rooms/${roomCode}/players/${loser.pid}`), { card: newCard });
+      addToast(`🧊 ${loser.name} lost a square for being last!`, 'battle');
+
+      push(ref(db, `rooms/${roomCode}/chat`), {
+        name: '🧊 Icing Penalty',
+        text: `❄️ ${loser.name} was last and lost "${pick.sq?.text ?? 'a square'}"!`,
+        timestamp: Date.now(), isFeed: true,
+        colors: { primary: '#003060', text: '#99d9d9' },
+      }).catch(() => {});
+    }
+
+    import('firebase/database').then(({ ref: fbRef, remove }) => {
+      remove(fbRef(db, `rooms/${roomCode}/icingChallenge`));
+      remove(fbRef(db, `rooms/${roomCode}/icingSubmissions`));
+    });
+    setActiveIcing(null);
+    return { loserName: loser.name };
+  }, [roomCode, addToast]);
+
+  // ── Send chat message + handle @mentions ─────────────────────────────────
   const handleSendChat = useCallback(async (text) => {
     if (!text.trim() || !roomCode) return;
     const myPlayer = roomData?.players?.[playerId];
     const colors = myPlayer?.colors
       ? { primary: myPlayer.colors.primary, text: myPlayer.colors.text }
       : null;
+
+    // Post the message
     await push(ref(db, `rooms/${roomCode}/chat`), {
-      name: playerName,
-      text: text.trim(),
-      timestamp: Date.now(),
-      colors,
+      name: playerName, text: text.trim(),
+      timestamp: Date.now(), colors,
     });
+
+    // ── Handle @mentions ───────────────────────────────────────────────────
+    const mentioned = [...text.matchAll(/@([^\s@]+)/g)].map(m => m[1].toLowerCase());
+    if (!mentioned.length) return;
+
+    const players = roomData?.players || {};
+
+    for (const [pid, player] of Object.entries(players)) {
+      const pNameLower = player.name?.toLowerCase() ?? '';
+      const isMentioned = mentioned.some(m => pNameLower.startsWith(m) || pNameLower === m);
+      if (!isMentioned) continue;
+
+      if (player.isBot) {
+        // Bot responds after a short human-like delay (1.5–3.5s)
+        const delay = 1500 + Math.random() * 2000;
+        setTimeout(async () => {
+          const charIdx = player.characterIndex ?? 0;
+          const response = getMentionResponse(charIdx);
+          // Address the sender back
+          const reply = `@${playerName} ${response}`;
+          await push(ref(db, `rooms/${roomCode}/chat`), {
+            name: player.name, text: reply,
+            timestamp: Date.now(),
+            colors: player.colors ? { primary: player.colors.primary, text: player.colors.text } : null,
+            isBot: true,
+          });
+        }, delay);
+
+      } else if (pid !== playerId) {
+        // Human player — they'll see a toast when their name appears in chat
+        // The toast fires on the listener side (handled in the Firebase listener below)
+      }
+    }
   }, [roomCode, playerName, roomData, playerId]);
 
 
@@ -289,7 +536,7 @@ export default function App() {
       }));
       return [
         ...shaped.slice(0, 12),
-        { ...FREE_SPACE, isMarked: true, isBlocked: false },
+        { ...FREE_SPACE, isMarked: false, isBlocked: false },
         ...shaped.slice(12, 24),
       ].map((sq, idx) => ({ ...sq, index: idx }));
     } catch (err) {
@@ -477,6 +724,7 @@ export default function App() {
     ['--team-primary','--team-secondary','--team-text','--team-primary-fade']
       .forEach(v => document.documentElement.style.removeProperty(v));
     seenAttacks.current.clear();
+    seenIcingIds.current.clear();
     lastBotChat.current = {};
     clearInterval(botChatTimer.current);
     setScreen('lobby');
@@ -507,6 +755,7 @@ export default function App() {
           onCreateRoom={handleCreateRoom}
           onJoinRoom={handleJoinRoom}
           onBack={() => setShowPeopleWatching(false)}
+          onTruthOrDare={() => { setShowPeopleWatching(false); setScreen('truth-or-dare'); }}
           llmStatus={llmStatus}
         />
       )}
@@ -535,7 +784,31 @@ export default function App() {
       )}
 
       {screen === 'win' && (
-        <WinScreen winner={winner} teamColors={teamColors} onPlayAgain={handlePlayAgain} />
+        <WinScreen winner={winner} teamColors={teamColors} chatMessages={chatMessages} onPlayAgain={handlePlayAgain} />
+      )}
+
+      {screen === 'truth-or-dare' && (
+        <TruthOrDare onBack={() => setScreen('lobby')} />
+      )}
+
+      {/* Icing selfie challenge — overlays on top of game */}
+      {screen === 'game' && activeIcing && (
+        <IcingChallenge
+          isHost={isHost}
+          playerId={playerId}
+          playerName={playerName}
+          roomData={roomData}
+          roomCode={roomCode}
+          onPostSelfie={handlePostSelfie}
+          onAdjudicate={handleIcingAdjudicate}
+          onDismiss={() => {
+            setActiveIcing(null);
+            import('firebase/database').then(({ ref: fbRef, remove }) => {
+              remove(fbRef(db, `rooms/${roomCode}/icingChallenge`));
+              remove(fbRef(db, `rooms/${roomCode}/icingSubmissions`));
+            });
+          }}
+        />
       )}
     </>
   );

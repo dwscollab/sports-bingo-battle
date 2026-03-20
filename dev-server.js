@@ -103,7 +103,28 @@ Reply ONLY with valid JSON, no other text:
   }
 });
 
-// ── /api/generate-people-squares ─────────────────────────────────────────
+// ── /api/nhl-proxy ────────────────────────────────────────────────────────
+app.get('/api/nhl-proxy', async (req, res) => {
+  const path = req.query?.path;
+  if (!path) return res.status(400).json({ error: 'path query param required' });
+
+  const allowed = /^(schedule\/[\d-]+|gamecenter\/\d+\/play-by-play)$/;
+  if (!allowed.test(path)) return res.status(400).json({ error: 'path not allowed' });
+
+  try {
+    const upstream = await fetch(`https://api-web.nhle.com/v1/${path}`, {
+      headers: { 'User-Agent': 'sports-bingo-battle/1.0' },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const data = await upstream.json();
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(data);
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+
 app.post('/api/generate-people-squares', async (req, res) => {
   if (!ANTHROPIC_API_KEY) {
     return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in .env' });
@@ -157,6 +178,33 @@ Return ONLY a valid JSON array of exactly 24 objects. No markdown, no preamble:
     res.json({ squares: squares.slice(0, 24) });
   } catch (err) {
     console.error('generate-people-squares error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── /api/w3w-convert ──────────────────────────────────────────────────────
+app.post('/api/w3w-convert', async (req, res) => {
+  const w3wKey = process.env.W3W_API_KEY;
+  if (!w3wKey) {
+    return res.status(200).json({ available: false, reason: 'W3W_API_KEY not configured' });
+  }
+
+  const { words, lat, lng } = req.body;
+  try {
+    let url;
+    if (words) {
+      const cleaned = words.trim().replace(/^\/\/\//, '').replace(/\s+/g, '.').toLowerCase();
+      url = `https://api.what3words.com/v3/convert-to-coordinates?words=${encodeURIComponent(cleaned)}&key=${w3wKey}`;
+    } else if (lat && lng) {
+      url = `https://api.what3words.com/v3/convert-to-3wa?coordinates=${lat},${lng}&key=${w3wKey}`;
+    } else {
+      return res.status(400).json({ error: 'Provide either words or lat/lng' });
+    }
+    const response = await fetch(url);
+    const data = await response.json();
+    if (data.error) return res.status(400).json({ error: data.error.message, available: true });
+    res.json({ available: true, words: data.words, lat: data.coordinates?.lat, lng: data.coordinates?.lng, nearestPlace: data.nearestPlace || null });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

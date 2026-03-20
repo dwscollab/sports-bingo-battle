@@ -47,7 +47,7 @@ export default function GameBoard({
   roomCode, roomData, playerId, playerName,
   teamColors, gameInfo, connectionStatus,
   onMarkSquare, onUnmarkSquare, onBattleShot,
-  chatMessages, onSendChat, addToast,
+  chatMessages, onSendChat, onReprocess, addToast,
 }) {
   const [showBattleModal,   setShowBattleModal]   = useState(false);
   const [cameraSquare,      setCameraSquare]       = useState(null);
@@ -133,7 +133,25 @@ export default function GameBoard({
           )}
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 5 }}>
-          {sport === 'hockey' && <LiveBadge status={connectionStatus} gameInfo={gameInfo} />}
+          {sport === 'hockey' && (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+              <LiveBadge status={connectionStatus} gameInfo={gameInfo} />
+              {onReprocess && (
+                <button
+                  onClick={() => { onReprocess(); addToast('🔄 Reprocessing all plays…', 'success'); }}
+                  style={{
+                    background: 'none', border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 20, padding: '2px 8px', cursor: 'pointer',
+                    fontSize: 9, color: 'rgba(255,255,255,0.4)', fontWeight: 700,
+                    letterSpacing: '0.05em',
+                  }}
+                  title="Reprocess all plays to fix missed auto-marks"
+                >
+                  🔄 RESYNC
+                </button>
+              )}
+            </div>
+          )}
           {battleShots > 0 && (
             <button className="battle-shots-badge" onClick={() => setShowBattleModal(true)}>
               💣 {battleShots}
@@ -299,6 +317,9 @@ export default function GameBoard({
         isOpen={chatOpen}
         onToggle={() => { setChatOpen(o => !o); setUnreadCount(0); }}
         unreadCount={unreadCount}
+        allPlayers={allPlayers.map(([pid, p]) => ({
+          id: pid, name: p.name, isBot: !!p.isBot,
+        }))}
       />
     </div>
   );

@@ -21,7 +21,7 @@ const LOCATION_METHODS = [
   { value: 'manual',   icon: '✏️', label: 'Type It In',      desc: 'Describe your location' },
 ];
 
-export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, llmStatus }) {
+export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, onTruthOrDare, llmStatus }) {
   const [mode,       setMode]       = useState('create');
   const [name,       setName]       = useState('');
   const [vibe,       setVibe]       = useState('anywhere');
@@ -162,13 +162,29 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
                 </p>
                 <button className="btn btn-secondary" onClick={loc.requestGPS}
                   disabled={loc.status === 'requesting' || loc.status === 'resolving'}>
-                  {loc.status === 'requesting' ? '📡 Requesting…'
-                   : loc.status === 'resolving' ? '🗺 Resolving…'
+                  {loc.status === 'requesting' ? '📡 Waiting for permission…'
+                   : loc.status === 'resolving' ? '🗺 Looking up address…'
                    : '📍 Detect My Location'}
                 </button>
+                {loc.debugInfo && (
+                  <p style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                    {loc.debugInfo}
+                  </p>
+                )}
+                <div style={{
+                  background: 'var(--surface2)', borderRadius: 8,
+                  padding: '8px 12px', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.7,
+                }}>
+                  <strong style={{ color: 'var(--text)' }}>If it keeps failing on iPhone:</strong>
+                  <br />Settings → Privacy & Security → Location Services
+                  <br />→ Safari → <strong>While Using the App</strong>
+                  <br /><br />
+                  <strong style={{ color: 'var(--text)' }}>On Chrome (Android/desktop):</strong>
+                  <br />Tap the 🔒 lock icon in the address bar → Allow location
+                </div>
                 {!loc.isSupported && (
                   <p style={{ fontSize: 11, color: 'var(--accent)' }}>
-                    ⚠️ GPS not available. Use zip code or type your location.
+                    ⚠️ GPS not available in this browser. Use zip code instead.
                   </p>
                 )}
               </div>
@@ -398,6 +414,29 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
           <p>📷 Camera squares need a photo — AI referee verifies it</p>
           <p>⚡ Battle squares are the rarest, most spectacular sightings</p>
           <p>💬 Chat and trash talk with your fellow people watchers</p>
+        </div>
+
+        {/* Truth or Dare — no location needed */}
+        <div
+          onClick={onTruthOrDare}
+          style={{
+            width: '100%', padding: '16px 18px', borderRadius: 14, cursor: 'pointer',
+            border: '1.5px dashed rgba(255,77,109,0.55)',
+            background: 'rgba(255,77,109,0.06)',
+            display: 'flex', alignItems: 'center', gap: 14,
+            transition: 'background 0.15s',
+          }}
+        >
+          <span style={{ fontSize: 30, flexShrink: 0 }}>🕵️</span>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 800, fontSize: 15, color: '#ff4d6d', marginBottom: 2 }}>
+              Truth or Dare
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+              No location needed · AI questions · Randy judges your answers
+            </div>
+          </div>
+          <span style={{ color: '#ff4d6d', fontSize: 18 }}>→</span>
         </div>
 
       </div>

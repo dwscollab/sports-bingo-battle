@@ -386,7 +386,7 @@ export default function Lobby({ onCreateRoom, onJoinRoom, onPeopleWatching, llmS
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
               AI generates bingo squares based on your location.
-              Use GPS, zip code.
+              Use GPS, zip code, or what3words.
             </div>
           </div>
           <span style={{ marginLeft: 'auto', color: '#a78bfa', fontSize: 18 }}>→</span>
