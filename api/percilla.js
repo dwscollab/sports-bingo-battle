@@ -62,7 +62,7 @@ You are Percilla.
 You are running this party.
 Make it messier.`;
 
-async function callClaude(system, userPrompt, maxTokens = 200, imageBase64 = null) {
+async function callClaude(system, userPrompt, maxTokens = 200, imageBase64 = null, action = '') {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set');
 
@@ -73,6 +73,8 @@ async function callClaude(system, userPrompt, maxTokens = 200, imageBase64 = nul
       ]
     : userPrompt;
 
+  const useSmartModel = ['card', 'judge_answer', 'judge_photo', 'judge_url'].includes(action);
+
   const res = await fetch(ANTHROPIC_API, {
     method: 'POST',
     headers: {
@@ -81,7 +83,7 @@ async function callClaude(system, userPrompt, maxTokens = 200, imageBase64 = nul
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify({
-      model: ['card','judge_answer','judge_photo','judge_url'].includes(req.body?.action) ? MODEL_SMART : MODEL_FAST,
+      model: useSmartModel ? MODEL_SMART : MODEL_FAST,
       max_tokens: maxTokens,
       system,
       messages: [{ role: 'user', content }],
@@ -146,7 +148,7 @@ INTRO: [your intro line]
 
 Nothing else.`;
 
-      result = await callClaude(system, prompt, 200);
+      result = await callClaude(system, prompt, 200, null, action);
 
       const cardMatch = result.match(/CARD:\s*(.+)/i);
       const introMatch = result.match(/INTRO:\s*(.+)/i);
@@ -161,7 +163,7 @@ Nothing else.`;
       const prompt = outcome === 'skip'
         ? `${playerName || 'They'} just SKIPPED their ${type}. React as Percilla. Disappointed, dramatic, calling them out. Max 2 sentences.`
         : `${playerName || 'They'} just completed their ${type}. React as Percilla. Excited, chaotic, stirring up the group. Max 2 sentences.`;
-      result = await callClaude(system, prompt, 120);
+      result = await callClaude(system, prompt, 120, null, action);
       return res.json({ text: result });
     }
 
@@ -173,21 +175,21 @@ Question: "${question}"
 Their answer: "${transcript}"
 
 React as Percilla. Rate 1-10 for honesty and boldness. Call them out if lying. Reference other players or earlier events if it sharpens the roast. Max 3 sentences. Format: Rating: X/10 | [response]`;
-      result = await callClaude(system, prompt, 220);
+      result = await callClaude(system, prompt, 220, null, action);
       return res.json({ text: result });
     }
 
     if (action === 'judge_photo') {
       const { imageBase64, dare, playerName } = params;
       const prompt = `${playerName || 'Someone'} submitted this photo for their dare.\n\nDare: "${dare}"\n\nReact as Percilla. Rate 1-10. Roast them. Reference game history. Max 3 sentences. Format: Rating: X/10 | [response]`;
-      result = await callClaude(system, prompt, 220, imageBase64);
+      result = await callClaude(system, prompt, 220, imageBase64, action);
       return res.json({ text: result });
     }
 
     if (action === 'judge_url') {
       const { url, dare, playerName } = params;
       const prompt = `${playerName || 'Someone'} submitted this URL for their dare.\n\nDare: "${dare}"\nURL: ${url}\n\nJudge them on the URL text alone. What does it say about them? Rate 1-10. Make it personal. Format: Rating: X/10 | [response]`;
-      result = await callClaude(system, prompt, 220);
+      result = await callClaude(system, prompt, 220, null, action);
       return res.json({ text: result });
     }
 
@@ -201,7 +203,7 @@ Format exactly:
 CALLOUT: [1 sentence roasting the dodge]
 RETRY_PROMPT: [push to re-answer — 1 sentence, more pointed]
 DARE_THREAT: [the dare if they refuse — make it sound bad]`;
-      const raw = await callClaude(system, prompt, 250);
+      const raw = await callClaude(system, prompt, 250, null, action);
       const calloutMatch = raw.match(/CALLOUT:\s*(.+)/i);
       const retryMatch   = raw.match(/RETRY_PROMPT:\s*(.+)/i);
       const dareMatch    = raw.match(/DARE_THREAT:\s*(.+)/i);
@@ -219,7 +221,7 @@ DARE_THREAT: [the dare if they refuse — make it sound bad]`;
 
 Write ONLY the exact content they need — the message to send, thing to say, post to make. Nothing else. No labels. No explanation. Just the raw text to copy or read. Make it embarrassing. Max 2 sentences.
 ${others ? `Other players they could name-drop: ${others}` : ''}`;
-      result = await callClaude(PERCILLA_CORE, prompt, 150);
+      result = await callClaude(PERCILLA_CORE, prompt, 150, null, action);
       return res.json({ text: result });
     }
 
