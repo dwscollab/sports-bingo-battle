@@ -131,8 +131,22 @@ export default function App() {
         }
       }
 
-      if (Object.keys(updates).length > 0) update(ref(db), updates);
-      markedTexts.forEach(t => addToast(`🏒 Auto-marked: "${t}"`, 'success'));
+      if (Object.keys(updates).length > 0) {
+        // Also push auto-marks to chat so they're permanently visible
+        if (markedTexts.length > 0) {
+          markedTexts.forEach(text => {
+            push(ref(db, `rooms/${roomCode}/chat`), {
+              name: '📡 Live Feed',
+              text: `Auto-marked: "${text}"`,
+              timestamp: Date.now(),
+              isFeed: true,
+              colors: { primary: '#1a3a1a', text: '#4caf50' },
+            }).catch(() => {});
+          });
+        }
+        update(ref(db), updates);
+      }
+      markedTexts.forEach(t => addToast(`📡 Auto-marked: "${t}"`, 'success'));
     });
 
     clearAutoMark();
@@ -417,9 +431,9 @@ export default function App() {
       }))
       .sort((a, b) => b.submitTime - a.submitTime); // last/non-submitter first
 
-    const loser = humanPlayers[0];
-    if (!loser || loser.submitTime === Infinity && Object.keys(submissions).length >= humanPlayers.length) {
-      // Everyone submitted — no penalty
+    // Everyone submitted — no penalty
+    const allSubmitted = humanPlayers.every(p => p.submitTime !== Infinity);
+    if (allSubmitted) {
       push(ref(db, `rooms/${roomCode}/chat`), {
         name: '🧊 Icing Challenge', text: '❄️ Everyone posted in time! No penalty.',
         timestamp: Date.now(), isFeed: true,
@@ -433,29 +447,73 @@ export default function App() {
       return null;
     }
 
+    const loser = humanPlayers[0]; // slowest or non-submitter
+    if (!loser) { setActiveIcing(null); return null; }
+
+    // Solo player — only penalize if they genuinely didn't submit
+    if (humanPlayers.length === 1 && loser.submitTime !== Infinity) {
+      push(ref(db, `rooms/${roomCode}/chat`), {
+        name: '🧊 Icing Challenge', text: '❄️ You posted in time! No penalty.',
+        timestamp: Date.now(), isFeed: true,
+        colors: { primary: '#003060', text: '#99d9d9' },
+      }).catch(() => {});
+      import('firebase/database').then(({ ref: fbRef, remove }) => {
+        remove(fbRef(db, `rooms/${roomCode}/icingChallenge`));
+        remove(fbRef(db, `rooms/${roomCode}/icingSubmissions`));
+      });
+      setActiveIcing(null);
+      return null;
+    }
+
     // Penalize the loser
     const player = players[loser.pid];
-    if (!player?.card) return null;
+    if (!player?.card) { setActiveIcing(null); return null; }
 
     const bingoLine  = player.bingoLine || [];
     const candidates = player.card
       .map((sq, idx) => ({ sq, idx }))
       .filter(({ sq, idx }) => sq.isMarked && !sq.isFree && !bingoLine.includes(idx));
 
+    const didNotSubmit = loser.submitTime === Infinity;
+    const penaltyVerb  = didNotSubmit ? 'skipped the selfie and lost' : 'was last and lost';
+
     if (candidates.length > 0) {
       const pick    = candidates[Math.floor(Math.random() * candidates.length)];
       const newCard = player.card.map(sq => ({ ...sq }));
       newCard[pick.idx] = { ...newCard[pick.idx], isMarked: false };
-
       await update(ref(db, `rooms/${roomCode}/players/${loser.pid}`), { card: newCard });
-      addToast(`🧊 ${loser.name} lost a square for being last!`, 'battle');
-
+      addToast(`🧊 ${loser.name} ${penaltyVerb} a square!`, 'battle');
       push(ref(db, `rooms/${roomCode}/chat`), {
         name: '🧊 Icing Penalty',
-        text: `❄️ ${loser.name} was last and lost "${pick.sq?.text ?? 'a square'}"!`,
+        text: `❄️ ${loser.name} ${penaltyVerb} "${pick.sq?.text ?? 'a square'}"!`,
         timestamp: Date.now(), isFeed: true,
         colors: { primary: '#003060', text: '#99d9d9' },
       }).catch(() => {});
+    } else {
+      // No marked squares to remove — block a random unmarked one instead
+      const blockCandidates = player.card
+        .map((sq, idx) => ({ sq, idx }))
+        .filter(({ sq }) => !sq.isMarked && !sq.isFree && !sq.isBlocked);
+      if (blockCandidates.length > 0) {
+        const pick    = blockCandidates[Math.floor(Math.random() * blockCandidates.length)];
+        const newCard = player.card.map(sq => ({ ...sq }));
+        newCard[pick.idx] = { ...newCard[pick.idx], isBlocked: true };
+        await update(ref(db, `rooms/${roomCode}/players/${loser.pid}`), { card: newCard });
+        addToast(`🧊 ${loser.name} ${penaltyVerb} a square blocked!`, 'battle');
+        push(ref(db, `rooms/${roomCode}/chat`), {
+          name: '🧊 Icing Penalty',
+          text: `❄️ ${loser.name} ${penaltyVerb} — "${pick.sq?.text ?? 'a square'}" is now blocked!`,
+          timestamp: Date.now(), isFeed: true,
+          colors: { primary: '#003060', text: '#99d9d9' },
+        }).catch(() => {});
+      } else {
+        push(ref(db, `rooms/${roomCode}/chat`), {
+          name: '🧊 Icing Penalty',
+          text: `❄️ ${loser.name} ${didNotSubmit ? 'skipped the selfie' : 'was last'} — nothing left to take... this time.`,
+          timestamp: Date.now(), isFeed: true,
+          colors: { primary: '#003060', text: '#99d9d9' },
+        }).catch(() => {});
+      }
     }
 
     import('firebase/database').then(({ ref: fbRef, remove }) => {
@@ -522,7 +580,7 @@ export default function App() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ locationDescription, vibe, playerCount }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(45_000),
       });
       if (!response.ok) throw new Error(`Server ${response.status}`);
       const data = await response.json();
@@ -534,9 +592,11 @@ export default function App() {
         battle: !!sq.battle, camera: !!sq.camera,
         isMarked: false, isBlocked: false, llmGenerated: true,
       }));
+      // People watching has no team win condition — FREE is immediately available
+      const freeSquare = { ...FREE_SPACE, isMarked: true, isBlocked: false, text: '⭐ FREE' };
       return [
         ...shaped.slice(0, 12),
-        { ...FREE_SPACE, isMarked: false, isBlocked: false },
+        { ...freeSquare },
         ...shaped.slice(12, 24),
       ].map((sq, idx) => ({ ...sq, index: idx }));
     } catch (err) {
@@ -567,8 +627,25 @@ export default function App() {
           location, gameDate: new Date().toDateString(),
         });
 
+    // Generate a small backup pool — swapped in when a battle shot blocks a square
+    let backupSquares = [];
+    try {
+      const backupCard = sport === 'people'
+        ? await generatePeopleCard({
+            locationDescription: locationDescription || gameLabel,
+            vibe: vibe || 'anywhere', playerCount: 2,
+          })
+        : await generateLLMCard({ sport, homeTeam, awayTeam, location, gameDate: new Date().toDateString() });
+      // Take 6 squares that aren't already on the main card
+      const mainTexts = new Set(card.map(s => s.text?.toLowerCase()));
+      backupSquares = (backupCard || [])
+        .filter(s => s && !s.isFree && !mainTexts.has(s.text?.toLowerCase()))
+        .slice(0, 6)
+        .map(s => ({ ...s, isMarked: false, isBlocked: false }));
+    } catch { /* backup generation is best-effort */ }
+
     const players = {
-      [playerId]: { name, team, colors, card, bingo: false, bingoLine: null, battleShots: 0 },
+      [playerId]: { name, team, colors, card, backupSquares, bingo: false, bingoLine: null, battleShots: 0 },
     };
 
     for (let i = 0; i < (botCount || 0); i++) {
@@ -704,11 +781,27 @@ export default function App() {
       addToast("That square can't be blocked!", 'battle'); return;
     }
 
-    targetCard[targetSquareIndex] = { ...tSq, isBlocked: true };
+    // Check if the target player has backup squares to swap in
+    const backupPool = [...(targetPlayer.backupSquares || [])];
+    const replacement = backupPool.shift(); // take first backup if available
+
+    if (replacement) {
+      // Swap the blocked square for a fresh one
+      targetCard[targetSquareIndex] = {
+        ...replacement,
+        index: targetSquareIndex,
+        isMarked: false, isBlocked: false,
+      };
+    } else {
+      // No backups left — just block it
+      targetCard[targetSquareIndex] = { ...tSq, isBlocked: true };
+    }
+
     const attackId = uuidv4().slice(0, 8);
 
     await update(ref(db), {
       [`rooms/${roomCode}/players/${targetPlayerId}/card`]:  targetCard,
+      [`rooms/${roomCode}/players/${targetPlayerId}/backupSquares`]: backupPool,
       [`rooms/${roomCode}/players/${playerId}/battleShots`]: (myPlayer.battleShots || 1) - 1,
       [`rooms/${roomCode}/attacks/${attackId}`]: {
         from: playerId, fromName: myPlayer.name,
@@ -716,7 +809,12 @@ export default function App() {
         resolved: true, timestamp: Date.now(),
       },
     });
-    addToast(`💣 Blocked a square on ${targetPlayer.name}'s card!`, 'battle');
+
+    if (replacement) {
+      addToast(`💣 Blocked "${tSq.text}" — swapped in a new square!`, 'battle');
+    } else {
+      addToast(`💣 Blocked a square on ${targetPlayer.name}'s card!`, 'battle');
+    }
   }, [roomData, playerId, roomCode, addToast]);
 
   // ── Reset ─────────────────────────────────────────────────────────────────

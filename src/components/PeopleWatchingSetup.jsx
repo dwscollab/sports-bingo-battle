@@ -433,7 +433,7 @@ export default function PeopleWatchingSetup({ onCreateRoom, onJoinRoom, onBack, 
               Truth or Dare
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
-              No location needed · AI questions · Randy judges your answers
+              No location needed · AI questions · Percilla judges your answers
             </div>
           </div>
           <span style={{ color: '#ff4d6d', fontSize: 18 }}>→</span>

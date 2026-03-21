@@ -37,7 +37,7 @@ export function useLLMSquares() {
           location,
           gameDate,
         }),
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(45_000),
       });
 
       if (!response.ok) throw new Error(`Server responded ${response.status}`);
